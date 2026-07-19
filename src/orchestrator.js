@@ -8,6 +8,7 @@ import { generateVoice } from './pipeline/ttsGenerator.js';
 import { assembleVideo } from './pipeline/videoAssembler.js';
 import { uploadToYouTube, fetchVideoMetrics } from './pipeline/youtubeUploader.js';
 import { addToHistory, updateHistoryEntry, getHistory, getRunById, recordPerformance } from './utils/store.js';
+import { getSettings, pickVoiceForGender, pickVisualForStyle } from './utils/settings.js';
 
 /**
  * Gera o conteudo completo (historia -> voz -> video) mas NAO publica.
@@ -26,10 +27,28 @@ export async function generateContent() {
     const story = await generateStory();
     updateHistoryEntry(runId, { status: 'generating_voice', theme: story.theme, title: story.title, style: story.style, story });
 
-    const { audioPath, words } = await generateVoice(story.script, outputDir);
+    const settings = getSettings();
+    const voiceId = settings.autoVoiceMatch ? pickVoiceForGender(settings.language, story.narratorGender) : settings.voice;
+    if (settings.autoVoiceMatch) {
+      logger.step('story', `Modo autonomo: voz escolhida pelo narrador (${story.narratorGender}) -> ${voiceId}`);
+    }
+
+    const { audioPath, words } = await generateVoice(story.script, outputDir, voiceId);
     updateHistoryEntry(runId, { status: 'generating_video' });
 
-    const videoPath = await assembleVideo({ audioPath, words, outputDir, imagePrompts: story.imagePrompts });
+    const visualPick = settings.autoVisualMatch ? pickVisualForStyle(story.style, settings.tone) : {};
+    if (settings.autoVisualMatch) {
+      logger.step('video', `Modo autonomo: visual="${visualPick.visualStyle}", legenda="${visualPick.captionStyle}" (categoria ${story.style})`);
+    }
+
+    const videoPath = await assembleVideo({
+      audioPath,
+      words,
+      outputDir,
+      imagePrompts: story.imagePrompts,
+      visualStyleOverride: visualPick.visualStyle,
+      captionStyleOverride: visualPick.captionStyle,
+    });
 
     updateHistoryEntry(runId, {
       status: 'draft',

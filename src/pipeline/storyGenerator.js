@@ -163,6 +163,7 @@ Devolve um JSON com este formato exato:
   "script": "a historia completa, incluindo o hook, pronta para narracao",
   "description": "descricao para o YouTube (2-3 frases + espaco para hashtags)",
   "tags": ["array", "de", "8 a 12", "tags", "relevantes"],
+  "narratorGender": "\"male\" ou \"female\" — o genero de quem narra/protagoniza a historia em primeira pessoa. Se o conteudo nao tiver um narrador com genero definido (ex: factos, historia, life hacks), usa \"neutral\"",
   "imagePrompts": ["array com EXATAMENTE ${imageCount} descricoes visuais curtas, SEMPRE EM INGLES independentemente do idioma escolhido acima (sao so para o modelo de imagem)", "cada uma corresponde a uma fase/beat diferente da narracao por ordem cronologica (ex: cena inicial, cena de escalada, cena final), para criar variacao visual ao longo do video", "cada descricao deve ser atmosferica e generica, SEM texto, SEM rostos reconheciveis, estilo cinematico, e visualmente distinta das outras"],
   "thumbnailText": "texto curto (max 5 palavras) para sobrepor na thumbnail"
 }`;
@@ -264,8 +265,9 @@ export async function generateStory() {
   while (imagePrompts.length < imageCount) imagePrompts.push(imagePrompts[imagePrompts.length - 1] || 'a moody, cinematic abstract background');
   story.imagePrompts = imagePrompts.slice(0, imageCount);
   story.style = style;
+  story.narratorGender = ['male', 'female'].includes(story.narratorGender) ? story.narratorGender : 'neutral';
 
-  logger.step('story', `Historia gerada: "${story.title}" (categoria: ${style}, ${story.imagePrompts.length} imagens)`);
+  logger.step('story', `Historia gerada: "${story.title}" (categoria: ${style}, narrador: ${story.narratorGender}, ${story.imagePrompts.length} imagens)`);
   return story;
 }
 

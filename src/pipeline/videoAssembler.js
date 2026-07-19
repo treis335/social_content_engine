@@ -184,12 +184,18 @@ function imageToKenBurnsClip(imagePath, durationSeconds, outputPath) {
  * Fundo alternativo, gerado localmente pelo ffmpeg (sem depender de nenhuma API externa).
  * E usado sempre que a geracao de imagem com FLUX falha, para o video nunca ficar bloqueado.
  */
-function generateGradientFallbackClip(durationSeconds, outputPath) {
+function generateGradientFallbackClip(durationSeconds, outputPath, seed = 0) {
+  const variants = [
+    { x0: 0, y0: 0, speed: 0.02 },
+    { x0: 1080, y0: 0, speed: 0.03 },
+    { x0: 0, y0: 1920, speed: 0.015 },
+  ];
+  const v = variants[seed % variants.length];
   return new Promise((resolve, reject) => {
     ffmpeg()
-      .input(`gradients=s=1080x1920:d=${durationSeconds}:speed=0.02:x0=0:y0=0`)
+      .input(`gradients=s=1080x1920:d=${durationSeconds}:speed=${v.speed}:x0=${v.x0}:y0=${v.y0}:rate=30`)
       .inputOptions(['-f lavfi'])
-      .outputOptions(['-c:v libx264', '-preset veryfast', '-pix_fmt yuv420p'])
+      .outputOptions(['-c:v libx264', '-preset veryfast', '-pix_fmt yuv420p', '-r 30'])
       .duration(durationSeconds)
       .output(outputPath)
       .on('error', reject)
@@ -228,6 +234,27 @@ function concatClips(clipPaths, outputDir, outputPath) {
  * unica imagem estatica do inicio ao fim. Cada cena usa uma imagem gerada por
  * IA diferente (uma por "beat" da narracao/conteudo).
  */
+/**
+ * Pequena pausa entre chamadas a API de imagens, para reduzir a hipotese de
+ * rate-limit quando pedimos varias imagens seguidas (era esta a causa mais
+ * provavel de o video acabar so com o fundo de gradiente estatico: a 1a
+ * imagem gerava bem, a 2a/3a falhavam por rate-limit e isso derrubava TODO o
+ * fundo para o fallback, mesmo tendo imagens boas ja geradas).
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Divide a duracao total do video em N cenas (uma por imagePrompt) e gera um
+ * clip Ken Burns por cena, para o video ter mais "acção" visual em vez de uma
+ * unica imagem estatica do inicio ao fim. Cada cena usa uma imagem gerada por
+ * IA diferente (uma por "beat" da narracao/conteudo).
+ *
+ * Cada cena e independente: se a geracao de UMA imagem falhar (rate-limit,
+ * erro pontual da API), so essa cena cai para um clip de gradiente — as
+ * outras cenas continuam a usar as imagens reais ja geradas com sucesso.
+ */
 async function buildBackgroundClips({ imagePrompts, outputDir, durationSeconds, styleSuffix }) {
   const manualClip = pickExistingBackgroundClip();
   if (manualClip) {
@@ -239,37 +266,45 @@ async function buildBackgroundClips({ imagePrompts, outputDir, durationSeconds, 
   const sceneCount = prompts.length;
   const baseSceneDuration = durationSeconds / sceneCount;
 
-  try {
-    const sceneClipPaths = [];
-    for (let i = 0; i < sceneCount; i++) {
-      // A ultima cena absorve o resto de segundos para a soma bater certo com durationSeconds.
-      const sceneDuration = i === sceneCount - 1
-        ? durationSeconds - baseSceneDuration * (sceneCount - 1)
-        : baseSceneDuration;
+  const sceneClipPaths = [];
+  let realImagesGenerated = 0;
 
+  for (let i = 0; i < sceneCount; i++) {
+    // A ultima cena absorve o resto de segundos para a soma bater certo com durationSeconds.
+    const sceneDuration = i === sceneCount - 1
+      ? durationSeconds - baseSceneDuration * (sceneCount - 1)
+      : baseSceneDuration;
+    const clipPath = path.join(outputDir, `background_clip_${i}.mp4`);
+
+    try {
+      if (i > 0) await sleep(1500); // espaça os pedidos a FLUX para evitar rate-limit
       const imagePath = await generateBackgroundImage(prompts[i], outputDir, styleSuffix, `background_${i}.png`);
-      const clipPath = path.join(outputDir, `background_clip_${i}.mp4`);
       await imageToKenBurnsClip(imagePath, sceneDuration, clipPath);
       sceneClipPaths.push(clipPath);
+      realImagesGenerated++;
+    } catch (err) {
+      logger.warn(`Cena ${i + 1}/${sceneCount} falhou (${err.message}). A usar gradiente so nesta cena.`);
+      await generateGradientFallbackClip(sceneDuration, clipPath, i);
+      sceneClipPaths.push(clipPath);
     }
-
-    const finalBackgroundPath = path.join(outputDir, 'background_combined.mp4');
-    return await concatClips(sceneClipPaths, outputDir, finalBackgroundPath);
-  } catch (err) {
-    logger.warn(`Fundo com IA falhou (${err.message}). A usar fundo alternativo gerado localmente.`);
-    const fallbackPath = path.join(outputDir, 'background_fallback.mp4');
-    await generateGradientFallbackClip(durationSeconds, fallbackPath);
-    return fallbackPath;
   }
+
+  if (!realImagesGenerated) {
+    logger.warn('Todas as imagens falharam — o fundo deste video vai ficar so com gradiente.');
+  }
+
+  if (sceneClipPaths.length === 1) return sceneClipPaths[0];
+  const finalBackgroundPath = path.join(outputDir, 'background_combined.mp4');
+  return await concatClips(sceneClipPaths, outputDir, finalBackgroundPath);
 }
 
-export async function assembleVideo({ audioPath, words, outputDir, imagePrompts }) {
+export async function assembleVideo({ audioPath, words, outputDir, imagePrompts, visualStyleOverride, captionStyleOverride }) {
   logger.step('video', 'A montar video final...');
 
   const settings = getSettings();
-  const captionStyle = CAPTION_STYLE_CATALOG.find(c => c.id === settings.captionStyle) || CAPTION_STYLE_CATALOG[0];
+  const captionStyle = CAPTION_STYLE_CATALOG.find(c => c.id === (captionStyleOverride || settings.captionStyle)) || CAPTION_STYLE_CATALOG[0];
   const captionPosition = CAPTION_POSITION_CATALOG.find(p => p.id === settings.captionPosition) || CAPTION_POSITION_CATALOG[0];
-  const visualStyle = VISUAL_STYLE_CATALOG.find(v => v.id === settings.visualStyle) || VISUAL_STYLE_CATALOG[0];
+  const visualStyle = VISUAL_STYLE_CATALOG.find(v => v.id === (visualStyleOverride || settings.visualStyle)) || VISUAL_STYLE_CATALOG[0];
 
   logger.step('video', `Estilo: legenda=${captionStyle.label} (${captionPosition.label}), visual=${visualStyle.label}`);
 

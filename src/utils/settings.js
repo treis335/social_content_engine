@@ -38,6 +38,57 @@ export function getVoiceEntry(voiceId) {
   return VOICE_CATALOG.find(v => v.id === voiceId) || VOICE_CATALOG[0];
 }
 
+/**
+ * Escolhe a voz certa automaticamente a partir do genero do narrador/protagonista
+ * da historia (devolvido pelo modelo em "narratorGender") e do idioma ativo.
+ * E o mecanismo que evita, por ex., uma historia contada por uma mulher sair
+ * com voz masculina so porque essa era a voz fixa nas definicoes.
+ */
+export function pickVoiceForGender(language, narratorGender) {
+  const genderMap = { male: 'Masculina', female: 'Feminina' };
+  const targetGender = genderMap[narratorGender];
+  const candidates = VOICE_CATALOG.filter(v => v.language === language);
+  if (!candidates.length) return defaultVoiceForLanguage(language);
+  if (targetGender) {
+    const match = candidates.filter(v => v.gender === targetGender);
+    if (match.length) return match[Math.floor(Math.random() * match.length)].id;
+  }
+  return candidates[Math.floor(Math.random() * candidates.length)].id;
+}
+
+/**
+ * Mapa de "bom senso" para escolher automaticamente o estilo visual e a cor
+ * das legendas a partir da categoria + tom da historia, sem o utilizador ter
+ * de configurar isto a mao (parte do modo autonomo).
+ */
+const STYLE_VISUAL_HINTS = {
+  revenge_justice_stories: { visualStyle: 'vibrant_dramatic', captionStyle: 'bold_yellow' },
+  aita_drama: { visualStyle: 'cinematic_realistic', captionStyle: 'clean_white' },
+  true_crime_lite: { visualStyle: 'dark_noir', captionStyle: 'red_impact' },
+  workplace_karma: { visualStyle: 'cinematic_realistic', captionStyle: 'bold_yellow' },
+  relationship_drama: { visualStyle: 'cinematic_realistic', captionStyle: 'red_impact' },
+  motivational: { visualStyle: 'gold_premium', captionStyle: 'gold_premium' },
+  educational_facts: { visualStyle: 'minimal_abstract', captionStyle: 'neon_green' },
+  psychology_insights: { visualStyle: 'minimal_abstract', captionStyle: 'clean_white' },
+  life_hacks: { visualStyle: 'vibrant_dramatic', captionStyle: 'neon_green' },
+  history_mysteries: { visualStyle: 'dark_noir', captionStyle: 'gold_premium' },
+};
+
+const TONE_VISUAL_OVERRIDE = {
+  suspenseful: { visualStyle: 'dark_noir' },
+  wholesome: { captionStyle: 'clean_white' },
+};
+
+/**
+ * Devolve {visualStyle, captionStyle} escolhidos automaticamente para a
+ * categoria/tom desta historia, usados quando "autoVisualMatch" esta ativo.
+ */
+export function pickVisualForStyle(style, tone) {
+  const base = STYLE_VISUAL_HINTS[style] || { visualStyle: 'cinematic_realistic', captionStyle: 'bold_yellow' };
+  const toneOverride = TONE_VISUAL_OVERRIDE[tone] || {};
+  return { ...base, ...toneOverride };
+}
+
 // ---- Tons de narrativa (moldam o system prompt do guionista) ----
 export const TONE_CATALOG = [
   { id: 'dramatic', label: 'Dramático', desc: 'Tensão alta, escalada emocional, clímax forte' },
@@ -116,6 +167,11 @@ const DEFAULT_SETTINGS = {
   // precisares de trocar a categoria manualmente.
   autoRotateStyles: false,
   activeStyles: STYLE_CATALOG.map(s => s.id),
+  // Modo autonomo: quando ativos, o sistema escolhe sozinho a voz (consoante o
+  // genero do narrador da historia gerada) e o visual/cor das legendas
+  // (consoante a categoria/tom), em vez de usar sempre os valores fixos abaixo.
+  autoVoiceMatch: false,
+  autoVisualMatch: false,
   // Numero de imagens/cenas de fundo geradas por video (2-3 da mais "accao"
   // visual do que 1 imagem estatica o video todo).
   imagesPerVideo: 3,

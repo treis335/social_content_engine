@@ -20,10 +20,10 @@ import { getSettings, getVoiceEntry } from '../utils/settings.js';
  * lido com sotaque ingles. Por isso o modelo de TTS a usar depende sempre da
  * voz escolhida nas definicoes (getVoiceEntry), nunca de um valor fixo.
  */
-export async function generateVoice(script, outputDir) {
+export async function generateVoice(script, outputDir, voiceIdOverride) {
   const { apiKey, baseUrl, sttModel } = config.together;
   const settings = getSettings();
-  const voiceEntry = getVoiceEntry(settings.voice);
+  const voiceEntry = getVoiceEntry(voiceIdOverride || settings.voice);
   const ttsVoice = voiceEntry.id;
   const ttsModel = voiceEntry.model;
 
