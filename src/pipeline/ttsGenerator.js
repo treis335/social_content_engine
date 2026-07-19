@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { getSettings } from '../utils/settings.js';
 
 /**
  * 1. Gera o audio (mp3) a partir do texto usando o TTS da Together AI.
@@ -15,11 +16,15 @@ import { logger } from '../utils/logger.js';
  * funciona com qualquer voz/modelo de TTS.
  */
 export async function generateVoice(script, outputDir) {
-  const { apiKey, baseUrl, ttsModel, ttsVoice, sttModel } = config.together;
+  const { apiKey, baseUrl, ttsModel, sttModel } = config.together;
+  const settings = getSettings();
+  const ttsVoice = settings.voice || config.together.ttsVoice;
 
   if (!apiKey) {
     throw new Error('TOGETHER_API_KEY tem de estar definido no .env');
   }
+
+  logger.step('tts', `Voz selecionada: ${ttsVoice}`);
 
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const audioPath = path.join(outputDir, 'narration.mp3');

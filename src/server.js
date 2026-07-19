@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { logger } from './utils/logger.js';
 import { generateContent, publishRun } from './orchestrator.js';
 import { getHistory, getRunById } from './utils/store.js';
+import { getSettings, updateSettings, getCatalogs } from './utils/settings.js';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -44,6 +45,20 @@ app.post('/api/generate', async (req, res) => {
     logger.error('Erro na geracao disparada pela dashboard:', err.message);
   } finally {
     isGenerating = false;
+  }
+});
+
+// ---- Definicoes (voz, tom, idioma, estilo) ----
+app.get('/api/settings', (req, res) => {
+  res.json({ settings: getSettings(), catalogs: getCatalogs() });
+});
+
+app.post('/api/settings', (req, res) => {
+  try {
+    const next = updateSettings(req.body || {});
+    res.json({ settings: next });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
