@@ -229,10 +229,9 @@ function pickTheme(style) {
  * de series/episodios. Devolve o JSON ja parseado (lanca erro descritivo se
  * a chamada falhar ou o JSON vier invalido).
  */
-async function callDeepSeek(systemPrompt, userPrompt, maxTokens = 1400) {
-  let response;
+async function callDeepSeekRaw(systemPrompt, userPrompt, maxTokens) {
   try {
-    response = await axios.post(
+    return await axios.post(
       `${config.deepseek.baseUrl}/chat/completions`,
       {
         model: config.deepseek.model,
@@ -254,13 +253,31 @@ async function callDeepSeek(systemPrompt, userPrompt, maxTokens = 1400) {
     const detail = err.response ? `HTTP ${err.response.status} — ${JSON.stringify(err.response.data)}` : err.message;
     throw new Error(`Falha na chamada a DeepSeek: ${detail}`);
   }
+}
 
-  const rawText = response.data.choices?.[0]?.message?.content || '';
+function extractJson(rawText) {
   const cleaned = rawText.replace(/```json|```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+async function callDeepSeek(systemPrompt, userPrompt, maxTokens = 1400) {
+  let response = await callDeepSeekRaw(systemPrompt, userPrompt, maxTokens);
+  let choice = response.data.choices?.[0];
+
+  // Se a resposta foi cortada por falta de tokens (finish_reason "length"), o
+  // JSON fica incompleto e o parse abaixo ia falhar sempre. Em vez de rebentar
+  // logo, tenta 1x mais com o dobro do orcamento de tokens.
+  if (choice?.finish_reason === 'length') {
+    logger.warn(`Resposta da DeepSeek cortada por limite de tokens (${maxTokens}) — a tentar outra vez com mais espaco...`);
+    response = await callDeepSeekRaw(systemPrompt, userPrompt, Math.min(maxTokens * 2, 4000));
+    choice = response.data.choices?.[0];
+  }
+
+  const rawText = choice?.message?.content || '';
   try {
-    return JSON.parse(cleaned);
+    return extractJson(rawText);
   } catch (err) {
-    logger.error('Falha a fazer parse do JSON devolvido pelo DeepSeek:', cleaned);
+    logger.error('Falha a fazer parse do JSON devolvido pelo DeepSeek:', rawText);
     throw new Error('DeepSeek devolveu um JSON invalido');
   }
 }
@@ -363,10 +380,10 @@ async function generateSeriesPremise({ style, tone, language }) {
 {
   "title": "titulo curto e cativante da serie (max 50 caracteres)",
   "premise": "premissa da serie em 2-3 frases: situacao inicial, conflito central, o que esta em jogo",
-  "characters": "personagens principais com 1 traço distintivo cada, formato 'Nome (papel): traço; Nome2 (papel): traço'"
+  "characters": "personagens principais (max 3) com 1 traço distintivo cada, formato curto 'Nome (papel): traço; Nome2 (papel): traço'"
 }`;
 
-  return callDeepSeek(system, user, 500);
+  return callDeepSeek(system, user, 700);
 }
 
 function buildRecentSummaryText(series) {
