@@ -65,24 +65,30 @@ export async function generateStory() {
 
   logger.step('story', 'A gerar historia com DeepSeek...');
 
-  const response = await axios.post(
-    `${config.deepseek.baseUrl}/chat/completions`,
-    {
-      model: config.deepseek.model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildUserPrompt(theme, avoidThemes) },
-      ],
-      temperature: 0.9,
-      max_tokens: 1200,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.deepseek.apiKey}`,
-        'Content-Type': 'application/json',
+  let response;
+  try {
+    response = await axios.post(
+      `${config.deepseek.baseUrl}/chat/completions`,
+      {
+        model: config.deepseek.model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: buildUserPrompt(theme, avoidThemes) },
+        ],
+        temperature: 0.9,
+        max_tokens: 1200,
       },
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${config.deepseek.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  } catch (err) {
+    const detail = err.response ? `HTTP ${err.response.status} — ${JSON.stringify(err.response.data)}` : err.message;
+    throw new Error(`Falha na chamada a DeepSeek: ${detail}`);
+  }
 
   const rawText = response.data.choices?.[0]?.message?.content || '';
   const cleaned = rawText.replace(/```json|```/g, '').trim();

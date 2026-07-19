@@ -27,22 +27,35 @@ export async function generateVoice(script, outputDir) {
   // ---- 1. Text-to-Speech ----
   logger.step('tts', 'A gerar narracao com Together AI...');
 
-  const ttsResponse = await axios.post(
-    `${baseUrl}/audio/speech`,
-    {
-      model: ttsModel,
-      input: script,
-      voice: ttsVoice,
-      response_format: 'mp3',
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+  let ttsResponse;
+  try {
+    ttsResponse = await axios.post(
+      `${baseUrl}/audio/speech`,
+      {
+        model: ttsModel,
+        input: script,
+        voice: ttsVoice,
+        response_format: 'mp3',
       },
-      responseType: 'arraybuffer',
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        responseType: 'arraybuffer',
+      }
+    );
+  } catch (err) {
+    let detail = err.message;
+    if (err.response) {
+      // A resposta de erro pode vir em arraybuffer (por causa do responseType); descodifica para JSON legivel.
+      const bodyText = Buffer.isBuffer(err.response.data)
+        ? err.response.data.toString('utf-8')
+        : JSON.stringify(err.response.data);
+      detail = `HTTP ${err.response.status} — ${bodyText}`;
     }
-  );
+    throw new Error(`Falha na chamada de TTS (Together AI): ${detail}`);
+  }
 
   fs.writeFileSync(audioPath, Buffer.from(ttsResponse.data));
   logger.step('tts', `Narracao gerada: ${audioPath}`);

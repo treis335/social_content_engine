@@ -64,29 +64,48 @@ function pickRandomMusic() {
 }
 
 /**
- * Gera uma imagem de fundo com FLUX (Together AI) a partir do imagePrompt
- * da historia, e devolve o caminho do ficheiro .png gerado.
+ * Devolve uma string legivel com o detalhe real do erro de uma chamada axios,
+ * incluindo o corpo da resposta da API (essencial para perceber erros 400).
+ */
+function describeAxiosError(err) {
+  if (err.response) {
+    const body = typeof err.response.data === 'object' ? JSON.stringify(err.response.data) : err.response.data;
+    return `HTTP ${err.response.status} — ${body}`;
+  }
+  return err.message;
+}
+
+/**
+ * Gera uma imagem de fundo com FLUX (Together AI) a partir do imagePrompt da historia.
+ * Nota: FLUX.1-schnell (endpoint serverless) tem um limite maximo de 1440px por lado,
+ * e largura/altura tem de ser multiplos de 32 — por isso usamos 768x1344 (proporcao
+ * vertical proxima de 9:16) em vez de 1080x1920 diretamente.
  */
 async function generateBackgroundImage(prompt, outputDir) {
   logger.step('video', 'A gerar imagem de fundo com FLUX (Together AI)...');
 
-  const response = await axios.post(
-    `${config.together.baseUrl}/images/generations`,
-    {
-      model: config.together.imageModel,
-      prompt: `${prompt}. Vertical composition, moody cinematic lighting, no text, no watermark, no visible faces.`,
-      width: 1088,
-      height: 1920,
-      steps: 4,
-      n: 1,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.together.apiKey}`,
-        'Content-Type': 'application/json',
+  let response;
+  try {
+    response = await axios.post(
+      `${config.together.baseUrl}/images/generations`,
+      {
+        model: config.together.imageModel,
+        prompt: `${prompt}. Vertical composition, moody cinematic lighting, no text, no watermark, no visible faces.`,
+        width: 768,
+        height: 1344,
+        steps: 4,
+        n: 1,
       },
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${config.together.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  } catch (err) {
+    throw new Error(`Falha a gerar imagem com FLUX: ${describeAxiosError(err)}`);
+  }
 
   const imageData = response.data.data[0];
   const imagePath = path.join(outputDir, 'background.png');
@@ -105,8 +124,7 @@ async function generateBackgroundImage(prompt, outputDir) {
 }
 
 /**
- * Transforma uma imagem estatica num video com efeito Ken Burns
- * (zoom lento continuo), para dar movimento ao fundo.
+ * Transforma uma imagem estatica num video com efeito Ken Burns (zoom lento continuo).
  */
 function imageToKenBurnsClip(imagePath, durationSeconds, outputPath) {
   return new Promise((resolve, reject) => {
@@ -126,6 +144,47 @@ function imageToKenBurnsClip(imagePath, durationSeconds, outputPath) {
   });
 }
 
+/**
+ * Fundo alternativo, gerado localmente pelo ffmpeg (sem depender de nenhuma API externa).
+ * E usado sempre que a geracao de imagem com FLUX falha, para o video nunca ficar bloqueado.
+ */
+function generateGradientFallbackClip(durationSeconds, outputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(`gradients=s=1080x1920:d=${durationSeconds}:speed=0.02:x0=0:y0=0`)
+      .inputOptions(['-f lavfi'])
+      .outputOptions(['-c:v libx264', '-preset veryfast', '-pix_fmt yuv420p'])
+      .duration(durationSeconds)
+      .output(outputPath)
+      .on('error', reject)
+      .on('end', resolve)
+      .run();
+  });
+}
+
+async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds }) {
+  const manualClip = pickExistingBackgroundClip();
+  if (manualClip) {
+    logger.step('video', `A usar clip de fundo manual: ${manualClip}`);
+    return manualClip;
+  }
+
+  const kenBurnsPath = path.join(outputDir, 'background_clip.mp4');
+  try {
+    const imagePath = await generateBackgroundImage(
+      imagePrompt || 'a moody, cinematic abstract background',
+      outputDir
+    );
+    await imageToKenBurnsClip(imagePath, durationSeconds, kenBurnsPath);
+    return kenBurnsPath;
+  } catch (err) {
+    logger.warn(`Fundo com IA falhou (${err.message}). A usar fundo alternativo gerado localmente.`);
+    const fallbackPath = path.join(outputDir, 'background_fallback.mp4');
+    await generateGradientFallbackClip(durationSeconds, fallbackPath);
+    return fallbackPath;
+  }
+}
+
 export async function assembleVideo({ audioPath, words, outputDir, imagePrompt }) {
   logger.step('video', 'A montar video final...');
 
@@ -135,16 +194,7 @@ export async function assembleVideo({ audioPath, words, outputDir, imagePrompt }
   const finalPath = path.join(outputDir, 'final.mp4');
   const durationSeconds = words.length ? words[words.length - 1].end + 1 : 60;
 
-  // Fundo: usa um clip manual se existir; caso contrario, gera com IA (FLUX + Ken Burns)
-  let backgroundPath = pickExistingBackgroundClip();
-  if (!backgroundPath) {
-    const imagePath = await generateBackgroundImage(
-      imagePrompt || 'a moody, cinematic abstract background',
-      outputDir
-    );
-    backgroundPath = path.join(outputDir, 'background_clip.mp4');
-    await imageToKenBurnsClip(imagePath, durationSeconds, backgroundPath);
-  }
+  const backgroundPath = await buildBackgroundClip({ imagePrompt, outputDir, durationSeconds });
 
   await new Promise((resolve, reject) => {
     const command = ffmpeg();
