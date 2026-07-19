@@ -75,7 +75,7 @@ async function generateBackgroundImage(prompt, outputDir) {
     {
       model: config.together.imageModel,
       prompt: `${prompt}. Vertical composition, moody cinematic lighting, no text, no watermark, no visible faces.`,
-      width: 1080,
+      width: 1088,
       height: 1920,
       steps: 4,
       n: 1,
