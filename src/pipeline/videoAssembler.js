@@ -2,8 +2,17 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+
+// Usa o binario de ffmpeg embutido pelo pacote "ffmpeg-static" em vez de depender
+// de o utilizador ter o ffmpeg instalado e configurado no PATH do sistema.
+if (ffmpegStatic) {
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+} else {
+  logger.warn('ffmpeg-static nao encontrou um binario para este sistema operativo. A tentar usar o ffmpeg do PATH do sistema.');
+}
 
 function buildCaptionChunks(words, wordsPerChunk = 3) {
   const chunks = [];

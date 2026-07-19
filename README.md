@@ -66,7 +66,7 @@ npm run run:once:publish     # gera 1 vídeo completo E publica de imediato
 ## Requisitos da máquina
 
 - Node.js 18+
-- **ffmpeg** instalado e no PATH (`ffmpeg -version` para confirmar)
+- (o ffmpeg já vem embutido via `ffmpeg-static` — não precisas de instalar nada à parte)
 
 ## Próximos passos naturais
 - Replicar cada vídeo para TikTok + Instagram Reels
