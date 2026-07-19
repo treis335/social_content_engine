@@ -205,41 +205,8 @@ function generateGradientFallbackClip(durationSeconds, outputPath, seed = 0) {
 }
 
 /**
- * Concatena varios clips (mesmo codec/resolucao) num unico ficheiro, usando o
- * demuxer "concat" do ffmpeg (rapido, sem reencodar, porque todos os clips
- * saem do imageToKenBurnsClip com as mesmas definicoes).
- */
-function concatClips(clipPaths, outputDir, outputPath) {
-  if (clipPaths.length === 1) return clipPaths[0];
-
-  const listPath = path.join(outputDir, 'concat_list.txt');
-  const listContent = clipPaths.map(p => `file '${escapePathForFfmpegFilter(path.resolve(p))}'`).join('\n');
-  fs.writeFileSync(listPath, listContent);
-
-  return new Promise((resolve, reject) => {
-    ffmpeg()
-      .input(listPath)
-      .inputOptions(['-f concat', '-safe 0'])
-      .outputOptions(['-c copy'])
-      .output(outputPath)
-      .on('error', reject)
-      .on('end', () => resolve(outputPath))
-      .run();
-  });
-}
-
-/**
- * Divide a duracao total do video em N cenas (uma por imagePrompt) e gera um
- * clip Ken Burns por cena, para o video ter mais "acção" visual em vez de uma
- * unica imagem estatica do inicio ao fim. Cada cena usa uma imagem gerada por
- * IA diferente (uma por "beat" da narracao/conteudo).
- */
-/**
  * Pequena pausa entre chamadas a API de imagens, para reduzir a hipotese de
- * rate-limit quando pedimos varias imagens seguidas (era esta a causa mais
- * provavel de o video acabar so com o fundo de gradiente estatico: a 1a
- * imagem gerava bem, a 2a/3a falhavam por rate-limit e isso derrubava TODO o
- * fundo para o fallback, mesmo tendo imagens boas ja geradas).
+ * rate-limit quando pedimos varias imagens seguidas.
  */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -254,12 +221,17 @@ function sleep(ms) {
  * Cada cena e independente: se a geracao de UMA imagem falhar (rate-limit,
  * erro pontual da API), so essa cena cai para um clip de gradiente — as
  * outras cenas continuam a usar as imagens reais ja geradas com sucesso.
+ *
+ * Devolve { clips: [caminhos...], loop } em vez de um unico ficheiro
+ * combinado — a concatenacao das cenas e feita mais tarde dentro do proprio
+ * filtro do ffmpeg em assembleVideo (concat demuxer + lista em ficheiro
+ * dava erro no Windows sempre que o caminho do projeto tinha espacos/parenteses).
  */
 async function buildBackgroundClips({ imagePrompts, outputDir, durationSeconds, styleSuffix }) {
   const manualClip = pickExistingBackgroundClip();
   if (manualClip) {
     logger.step('video', `A usar clip de fundo manual: ${manualClip}`);
-    return manualClip;
+    return { clips: [manualClip], loop: true };
   }
 
   const prompts = (imagePrompts && imagePrompts.length ? imagePrompts : ['a moody, cinematic abstract background']);
@@ -293,9 +265,7 @@ async function buildBackgroundClips({ imagePrompts, outputDir, durationSeconds, 
     logger.warn('Todas as imagens falharam — o fundo deste video vai ficar so com gradiente.');
   }
 
-  if (sceneClipPaths.length === 1) return sceneClipPaths[0];
-  const finalBackgroundPath = path.join(outputDir, 'background_combined.mp4');
-  return await concatClips(sceneClipPaths, outputDir, finalBackgroundPath);
+  return { clips: sceneClipPaths, loop: false };
 }
 
 export async function assembleVideo({ audioPath, words, outputDir, imagePrompts, visualStyleOverride, captionStyleOverride }) {
@@ -319,7 +289,7 @@ export async function assembleVideo({ audioPath, words, outputDir, imagePrompts,
   const finalPath = path.join(outputDir, 'final.mp4');
   const durationSeconds = words.length ? words[words.length - 1].end + 1 : 60;
 
-  const backgroundPath = await buildBackgroundClips({
+  const background = await buildBackgroundClips({
     imagePrompts,
     outputDir,
     durationSeconds,
@@ -328,17 +298,32 @@ export async function assembleVideo({ audioPath, words, outputDir, imagePrompts,
 
   await new Promise((resolve, reject) => {
     const command = ffmpeg();
-    command.input(backgroundPath).inputOptions(['-stream_loop -1']);
-    command.input(audioPath);
-    if (musicPath) command.input(musicPath).inputOptions(['-stream_loop -1']);
+    const bgClips = background.clips;
 
-    const filters = [
-      '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
-      `[bg]ass=${escapePathForFfmpegFilter(assPath)}[v]`,
-    ];
+    bgClips.forEach(clipPath => {
+      command.input(clipPath);
+      if (background.loop) command.inputOptions(['-stream_loop -1']);
+    });
+    const audioInputIndex = bgClips.length;
+    command.input(audioPath);
+    let musicInputIndex = null;
+    if (musicPath) {
+      musicInputIndex = audioInputIndex + 1;
+      command.input(musicPath).inputOptions(['-stream_loop -1']);
+    }
+
+    const filters = [];
+    if (bgClips.length > 1) {
+      const concatInputs = bgClips.map((_, i) => `[${i}:v]`).join('');
+      filters.push(`${concatInputs}concat=n=${bgClips.length}:v=1:a=0[bgraw]`);
+      filters.push('[bgraw]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]');
+    } else {
+      filters.push('[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]');
+    }
+    filters.push(`[bg]ass=${escapePathForFfmpegFilter(assPath)}[v]`);
 
     if (musicPath) {
-      filters.push('[1:a]volume=1.0[voice]', '[2:a]volume=0.12[music]', '[voice][music]amix=inputs=2:duration=first[a]');
+      filters.push(`[${audioInputIndex}:a]volume=1.0[voice]`, `[${musicInputIndex}:a]volume=0.12[music]`, '[voice][music]amix=inputs=2:duration=first[a]');
     }
 
     command.complexFilter(filters);
@@ -346,7 +331,7 @@ export async function assembleVideo({ audioPath, words, outputDir, imagePrompts,
     command
       .outputOptions([
         '-map [v]',
-        musicPath ? '-map [a]' : '-map 1:a',
+        musicPath ? '-map [a]' : `-map ${audioInputIndex}:a`,
         '-c:v libx264',
         '-preset veryfast',
         '-crf 20',
