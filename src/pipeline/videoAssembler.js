@@ -36,6 +36,16 @@ function formatAssTime(seconds) {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
 }
 
+/**
+ * Escapa um caminho de ficheiro para poder ser usado dentro de uma string de
+ * filtro do ffmpeg (ex: "ass=caminho"). No Windows os caminhos usam "\" e podem
+ * ter "C:\", e ambos os caracteres tem significado especial dentro de um filtro
+ * do ffmpeg — por isso convertemos para "/" e escapamos os ":" restantes.
+ */
+function escapePathForFfmpegFilter(filePath) {
+  return filePath.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
 function generateAssFile(chunks, outputPath) {
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -213,7 +223,7 @@ export async function assembleVideo({ audioPath, words, outputDir, imagePrompt }
 
     const filters = [
       '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
-      `[bg]ass=${assPath.replace(/:/g, '\\:')}[v]`,
+      `[bg]ass=${escapePathForFfmpegFilter(assPath)}[v]`,
     ];
 
     if (musicPath) {
