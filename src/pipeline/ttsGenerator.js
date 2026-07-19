@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
-import { getSettings } from '../utils/settings.js';
+import { getSettings, getVoiceEntry } from '../utils/settings.js';
 
 /**
  * 1. Gera o audio (mp3) a partir do texto usando o TTS da Together AI.
@@ -14,17 +14,24 @@ import { getSettings } from '../utils/settings.js';
  * alinhamento por palavra (isso so existe no modo streaming). O Whisper
  * com "timestamp_granularities: word" resolve isto de forma fiavel e
  * funciona com qualquer voz/modelo de TTS.
+ *
+ * IMPORTANTE sobre idiomas: o modelo Orpheus (vozes tara/leo/zac/etc) so
+ * fala ingles nativamente — dar-lhe texto em portugues resulta em portugues
+ * lido com sotaque ingles. Por isso o modelo de TTS a usar depende sempre da
+ * voz escolhida nas definicoes (getVoiceEntry), nunca de um valor fixo.
  */
 export async function generateVoice(script, outputDir) {
-  const { apiKey, baseUrl, ttsModel, sttModel } = config.together;
+  const { apiKey, baseUrl, sttModel } = config.together;
   const settings = getSettings();
-  const ttsVoice = settings.voice || config.together.ttsVoice;
+  const voiceEntry = getVoiceEntry(settings.voice);
+  const ttsVoice = voiceEntry.id;
+  const ttsModel = voiceEntry.model;
 
   if (!apiKey) {
     throw new Error('TOGETHER_API_KEY tem de estar definido no .env');
   }
 
-  logger.step('tts', `Voz selecionada: ${ttsVoice}`);
+  logger.step('tts', `Voz selecionada: ${ttsVoice} (modelo ${ttsModel}, idioma ${settings.language})`);
 
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const audioPath = path.join(outputDir, 'narration.mp3');
@@ -41,6 +48,7 @@ export async function generateVoice(script, outputDir) {
         input: script,
         voice: ttsVoice,
         response_format: 'mp3',
+        language: settings.language,
       },
       {
         headers: {
@@ -74,6 +82,10 @@ export async function generateVoice(script, outputDir) {
   form.append('model', sttModel);
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'word');
+  // Forcar o idioma no Whisper evita que ele "adivinhe" mal e transcreva
+  // como ingles um audio que na verdade esta em portugues/espanhol (era esta
+  // a causa das legendas ficarem em ingles mesmo com a voz certa).
+  form.append('language', settings.language);
 
   const sttResponse = await fetch(`${baseUrl}/audio/transcriptions`, {
     method: 'POST',

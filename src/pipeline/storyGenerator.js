@@ -81,20 +81,29 @@ Regras obrigatorias:
 - Responde SOMENTE com o objeto JSON. Nada de texto antes ou depois.`;
 }
 
-function buildUserPrompt(theme, avoidThemes) {
-  return `Tema desta historia: "${theme}"
+const FIELD_LANGUAGE_REMINDER = {
+  en: 'Lembrete: title, hook, script, description e thumbnailText têm de estar em INGLÊS.',
+  pt: 'Lembrete: title, hook, script, description e thumbnailText têm de estar em PORTUGUÊS, mesmo que o tema abaixo esteja descrito em inglês — traduz/adapta a ideia, não escrevas em inglês.',
+  es: 'Lembrete: title, hook, script, description e thumbnailText têm de estar em ESPANHOL, mesmo que o tema abaixo esteja descrito em inglês — traduz/adapta a ideia, não escrevas em inglês.',
+};
+
+function buildUserPrompt(theme, avoidThemes, language) {
+  const langReminder = FIELD_LANGUAGE_REMINDER[language] || FIELD_LANGUAGE_REMINDER.en;
+  return `Tema desta historia (descrito em ingles só como referência interna, NÃO copiar o idioma): "${theme}"
 
 Temas ja usados recentemente (evita repetir o twist ou situacao exata destes): ${avoidThemes.join(', ') || 'nenhum ainda'}
 
+${langReminder}
+
 Devolve um JSON com este formato exato:
 {
-  "theme": "string curto identificando o tema",
+  "theme": "string curto identificando o tema (pode ficar em ingles, e so uso interno)",
   "title": "titulo chamativo para o video (max 60 caracteres, estilo clickbait honesto)",
   "hook": "a primeira frase da historia, isolada",
   "script": "a historia completa, incluindo o hook, pronta para narracao",
   "description": "descricao para o YouTube (2-3 frases + espaco para hashtags)",
   "tags": ["array", "de", "8 a 12", "tags", "relevantes"],
-  "imagePrompt": "descricao visual curta (em ingles) para gerar uma imagem de fundo generica e atmosferica relacionada com a historia, SEM texto, SEM rostos reconheciveis, estilo cinematico",
+  "imagePrompt": "descricao visual curta, SEMPRE EM INGLES independentemente do idioma escolhido acima (e so para o modelo de imagem), para gerar uma imagem de fundo generica e atmosferica relacionada com a historia, SEM texto, SEM rostos reconheciveis, estilo cinematico",
   "thumbnailText": "texto curto (max 5 palavras) para sobrepor na thumbnail"
 }`;
 }
@@ -129,7 +138,7 @@ export async function generateStory() {
         model: config.deepseek.model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: buildUserPrompt(theme, avoidThemes) },
+          { role: 'user', content: buildUserPrompt(theme, avoidThemes, settings.language) },
         ],
         temperature: 0.9,
         max_tokens: 1200,

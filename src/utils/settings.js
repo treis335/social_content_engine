@@ -4,18 +4,39 @@ import { config } from '../config.js';
 
 const SETTINGS_FILE = path.join(config.paths.dataDir, 'settings.json');
 
-// ---- Catalogo de vozes disponiveis no modelo Orpheus (Together AI) ----
-// Fonte: canopylabs/orpheus-3b-0.1-ft — 8 vozes fixas em ingles.
+// ---- Catalogo de vozes disponiveis na Together AI ----
+// IMPORTANTE: o modelo Orpheus (canopylabs/orpheus-3b-0.1-ft) SO tem vozes em
+// ingles. Para portugues/espanhol usamos o modelo Kokoro (hexgrad/Kokoro-82M),
+// que tem vozes nativas nesses idiomas. Usar uma voz Orpheus com texto em
+// portugues produz portugues lido com sotaque ingles (o problema original).
+// Cada voz sabe a que modelo e a que idioma pertence, para escolhermos sempre
+// o modelo certo automaticamente em funcao do idioma selecionado.
 export const VOICE_CATALOG = [
-  { id: 'leo', label: 'Leo', gender: 'Masculina', desc: 'Grave, autoritária — a mais "vendável" para revenge/justice' },
-  { id: 'zac', label: 'Zac', gender: 'Masculina', desc: 'Energética, dinâmica — boa para hooks fortes' },
-  { id: 'dan', label: 'Dan', gender: 'Masculina', desc: 'Amigável, casual — tom de conversa' },
-  { id: 'tara', label: 'Tara', gender: 'Feminina', desc: 'Conversacional, clara (default original)' },
-  { id: 'leah', label: 'Leah', gender: 'Feminina', desc: 'Calorosa, suave' },
-  { id: 'jess', label: 'Jess', gender: 'Feminina', desc: 'Energética, jovem' },
-  { id: 'mia', label: 'Mia', gender: 'Feminina', desc: 'Profissional, articulada' },
-  { id: 'zoe', label: 'Zoe', gender: 'Feminina', desc: 'Calma, tranquilizadora' },
+  // --- Ingles: Orpheus ---
+  { id: 'leo', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Leo', gender: 'Masculina', desc: 'Grave, autoritária — a mais "vendável" para revenge/justice' },
+  { id: 'zac', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Zac', gender: 'Masculina', desc: 'Energética, dinâmica — boa para hooks fortes' },
+  { id: 'dan', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Dan', gender: 'Masculina', desc: 'Amigável, casual — tom de conversa' },
+  { id: 'tara', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Tara', gender: 'Feminina', desc: 'Conversacional, clara (default original)' },
+  { id: 'leah', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Leah', gender: 'Feminina', desc: 'Calorosa, suave' },
+  { id: 'jess', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Jess', gender: 'Feminina', desc: 'Energética, jovem' },
+  { id: 'mia', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Mia', gender: 'Feminina', desc: 'Profissional, articulada' },
+  { id: 'zoe', model: 'canopylabs/orpheus-3b-0.1-ft', language: 'en', label: 'Zoe', gender: 'Feminina', desc: 'Calma, tranquilizadora' },
+  // --- Portugues: Kokoro ---
+  { id: 'pm_alex', model: 'hexgrad/Kokoro-82M', language: 'pt', label: 'Alex (PT)', gender: 'Masculina', desc: 'Voz portuguesa nativa (Kokoro) — clara, neutra' },
+  { id: 'pf_dora', model: 'hexgrad/Kokoro-82M', language: 'pt', label: 'Dora (PT)', gender: 'Feminina', desc: 'Voz portuguesa nativa (Kokoro) — feminina' },
+  // --- Espanhol: Kokoro ---
+  { id: 'em_alex', model: 'hexgrad/Kokoro-82M', language: 'es', label: 'Alex (ES)', gender: 'Masculina', desc: 'Voz espanhola nativa (Kokoro) — clara, neutra' },
+  { id: 'ef_dora', model: 'hexgrad/Kokoro-82M', language: 'es', label: 'Dora (ES)', gender: 'Feminina', desc: 'Voz espanhola nativa (Kokoro) — feminina' },
 ];
+
+export function defaultVoiceForLanguage(language) {
+  const match = VOICE_CATALOG.find(v => v.language === language);
+  return match ? match.id : VOICE_CATALOG[0].id;
+}
+
+export function getVoiceEntry(voiceId) {
+  return VOICE_CATALOG.find(v => v.id === voiceId) || VOICE_CATALOG[0];
+}
 
 // ---- Tons de narrativa (moldam o system prompt do guionista) ----
 export const TONE_CATALOG = [
@@ -85,6 +106,16 @@ export function updateSettings(updates) {
   }
 
   const next = { ...current, ...updates };
+
+  // Se o idioma mudou e a voz atual nao existe nesse idioma (ex: Orpheus so
+  // tem vozes em ingles), troca automaticamente para a primeira voz nativa
+  // desse idioma em vez de deixar ficar uma combinacao invalida guardada
+  // (era esta a causa do narrador falar portugues com sotaque ingles).
+  const voiceEntry = VOICE_CATALOG.find(v => v.id === next.voice);
+  if (!voiceEntry || voiceEntry.language !== next.language) {
+    next.voice = defaultVoiceForLanguage(next.language);
+  }
+
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2));
   return next;
 }

@@ -376,18 +376,29 @@ async function loadSettings() {
   const styleSelect = document.getElementById('styleSelect');
   const languageSelect = document.getElementById('languageSelect');
 
-  fillSelect(voiceSelect, catalogs.voices, settings.voice);
+  fillSelect(languageSelect, catalogs.languages, settings.language);
+  refreshVoiceOptions(settings.language, settings.voice);
   fillSelect(toneSelect, catalogs.tones, settings.tone);
   fillSelect(styleSelect, catalogs.styles, settings.style);
-  fillSelect(languageSelect, catalogs.languages, settings.language);
 
-  updateDesc(document.getElementById('voiceDesc'), catalogs.voices, settings.voice);
   updateDesc(document.getElementById('toneDesc'), catalogs.tones, settings.tone);
   updateDesc(document.getElementById('styleDesc'), catalogs.styles, settings.style);
 
+  // Cada idioma so tem certas vozes disponiveis (ex: as vozes do modelo
+  // Orpheus so falam ingles) — ao trocar de idioma, a lista de vozes
+  // atualiza-se logo para mostrar so as vozes nativas desse idioma.
+  languageSelect.addEventListener('change', () => refreshVoiceOptions(languageSelect.value));
   voiceSelect.addEventListener('change', () => updateDesc(document.getElementById('voiceDesc'), catalogsCache.voices, voiceSelect.value));
   toneSelect.addEventListener('change', () => updateDesc(document.getElementById('toneDesc'), catalogsCache.tones, toneSelect.value));
   styleSelect.addEventListener('change', () => updateDesc(document.getElementById('styleDesc'), catalogsCache.styles, styleSelect.value));
+}
+
+function refreshVoiceOptions(language, preferredVoiceId) {
+  const voiceSelect = document.getElementById('voiceSelect');
+  const voicesForLanguage = catalogsCache.voices.filter(v => v.language === language);
+  const selected = voicesForLanguage.some(v => v.id === preferredVoiceId) ? preferredVoiceId : voicesForLanguage[0]?.id;
+  fillSelect(voiceSelect, voicesForLanguage, selected);
+  updateDesc(document.getElementById('voiceDesc'), voicesForLanguage, selected);
 }
 
 async function saveSettings() {
