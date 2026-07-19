@@ -62,6 +62,34 @@ export const LANGUAGE_CATALOG = [
   { id: 'es', label: 'Espanhol' },
 ];
 
+// ---- Estilo das legendas (cor + contorno) ----
+// Cores em hex simples (ex: "FFE000"); o video assembler converte para o
+// formato ASS (&H00BBGGRR) na hora de gerar o ficheiro de legendas.
+export const CAPTION_STYLE_CATALOG = [
+  { id: 'bold_yellow', label: 'Amarelo Bold', primary: 'FFE000', outline: '000000', desc: 'Alto contraste — o mais usado em conteúdo viral (estilo MrBeast)' },
+  { id: 'clean_white', label: 'Branco Limpo', primary: 'FFFFFF', outline: '000000', desc: 'Clássico, sempre legível, discreto' },
+  { id: 'neon_green', label: 'Verde Neon', primary: '39FF14', outline: '000000', desc: 'Chamativo — bom para energia/gaming' },
+  { id: 'red_impact', label: 'Vermelho Impacto', primary: 'FF3B30', outline: '1A0000', desc: 'Urgência e tensão dramática' },
+  { id: 'gold_premium', label: 'Dourado Premium', primary: 'FFD700', outline: '3D2B00', desc: 'Sensação de exclusividade/luxo' },
+];
+
+// ---- Posicao das legendas no ecra ----
+// alignment segue a numeracao ASS (numpad): 2=baixo-centro, 5=centro, 8=topo-centro.
+export const CAPTION_POSITION_CATALOG = [
+  { id: 'bottom', label: 'Fundo', alignment: 2, marginV: 500 },
+  { id: 'middle', label: 'Centro', alignment: 5, marginV: 0 },
+  { id: 'top', label: 'Topo', alignment: 8, marginV: 500 },
+];
+
+// ---- Estilo visual do fundo gerado por IA (FLUX) ----
+export const VISUAL_STYLE_CATALOG = [
+  { id: 'cinematic_realistic', label: 'Cinemático Realista', promptSuffix: 'photorealistic, cinematic lighting, moody atmosphere, 35mm film grain, shallow depth of field', desc: 'Fotográfico, sério, credível' },
+  { id: 'vibrant_dramatic', label: 'Vibrante Dramático', promptSuffix: 'vibrant saturated colors, dramatic dynamic lighting, high contrast, dynamic composition', desc: 'Cores fortes, alta energia' },
+  { id: 'dark_noir', label: 'Noir Sombrio', promptSuffix: 'dark noir aesthetic, high contrast shadows, desaturated colors, moody, mysterious atmosphere', desc: 'Tenso, misterioso' },
+  { id: 'minimal_abstract', label: 'Abstrato Minimalista', promptSuffix: 'minimalist abstract shapes, soft gradients, clean modern design, negative space', desc: 'Neutro, não distrai da narração' },
+  { id: 'anime_illustration', label: 'Ilustração Anime', promptSuffix: 'anime and manga illustration style, vibrant colors, detailed line art, studio quality', desc: 'Estilo desenhado, chamativo para público jovem' },
+];
+
 const DEFAULT_SETTINGS = {
   // Nota: nao herdamos TOGETHER_TTS_VOICE do .env (ficava preso em "tara", a voz
   // feminina suave que motivou este painel). O default passa a ser "leo" —
@@ -71,6 +99,9 @@ const DEFAULT_SETTINGS = {
   style: config.channel.niche || 'revenge_justice_stories',
   language: 'en',
   videosPerDay: config.channel.videosPerDay || 2,
+  captionStyle: 'bold_yellow',
+  captionPosition: 'bottom',
+  visualStyle: 'cinematic_realistic',
 };
 
 function ensureFile() {
@@ -104,6 +135,15 @@ export function updateSettings(updates) {
   if (updates.language && !LANGUAGE_CATALOG.some(l => l.id === updates.language)) {
     throw new Error(`Idioma "${updates.language}" inválido.`);
   }
+  if (updates.captionStyle && !CAPTION_STYLE_CATALOG.some(c => c.id === updates.captionStyle)) {
+    throw new Error(`Estilo de legenda "${updates.captionStyle}" inválido.`);
+  }
+  if (updates.captionPosition && !CAPTION_POSITION_CATALOG.some(p => p.id === updates.captionPosition)) {
+    throw new Error(`Posição de legenda "${updates.captionPosition}" inválida.`);
+  }
+  if (updates.visualStyle && !VISUAL_STYLE_CATALOG.some(v => v.id === updates.visualStyle)) {
+    throw new Error(`Estilo visual "${updates.visualStyle}" inválido.`);
+  }
 
   const next = { ...current, ...updates };
 
@@ -126,5 +166,8 @@ export function getCatalogs() {
     tones: TONE_CATALOG,
     styles: STYLE_CATALOG,
     languages: LANGUAGE_CATALOG,
+    captionStyles: CAPTION_STYLE_CATALOG,
+    captionPositions: CAPTION_POSITION_CATALOG,
+    visualStyles: VISUAL_STYLE_CATALOG,
   };
 }

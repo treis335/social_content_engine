@@ -5,6 +5,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { getSettings, CAPTION_STYLE_CATALOG, CAPTION_POSITION_CATALOG, VISUAL_STYLE_CATALOG } from '../utils/settings.js';
 
 // Usa o binario de ffmpeg embutido pelo pacote "ffmpeg-static" em vez de depender
 // de o utilizador ter o ffmpeg instalado e configurado no PATH do sistema.
@@ -46,7 +47,21 @@ function escapePathForFfmpegFilter(filePath) {
   return filePath.replace(/\\/g, '/').replace(/:/g, '\\:');
 }
 
-function generateAssFile(chunks, outputPath) {
+/**
+ * Converte uma cor em hex simples ("RRGGBB") para o formato de cor usado
+ * pelo ASS/libass, que e "&H00BBGGRR" (alpha, depois BGR em vez de RGB).
+ */
+function hexToAssColor(hex) {
+  const clean = hex.replace('#', '').padStart(6, '0');
+  const r = clean.slice(0, 2);
+  const g = clean.slice(2, 4);
+  const b = clean.slice(4, 6);
+  return `&H00${b}${g}${r}`.toUpperCase();
+}
+
+function generateAssFile(chunks, outputPath, { primaryHex, outlineHex, alignment, marginV }) {
+  const primaryColour = hexToAssColor(primaryHex);
+  const outlineColour = hexToAssColor(outlineHex);
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -54,7 +69,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
-Style: Caption,Arial Black,90,&H00FFFFFF,&H00000000,&H90000000,1,4,0,2,80,80,500
+Style: Caption,Arial Black,90,${primaryColour},${outlineColour},&H90000000,1,4,0,${alignment},80,80,${marginV}
 
 [Events]
 Format: Layer, Start, End, Style, Text
@@ -100,8 +115,10 @@ function describeAxiosError(err) {
  * e largura/altura tem de ser multiplos de 32 — por isso usamos 768x1344 (proporcao
  * vertical proxima de 9:16) em vez de 1080x1920 diretamente.
  */
-async function generateBackgroundImage(prompt, outputDir) {
+async function generateBackgroundImage(prompt, outputDir, styleSuffix) {
   logger.step('video', 'A gerar imagem de fundo com FLUX (Together AI)...');
+
+  const fullPrompt = `${prompt}. Vertical composition, ${styleSuffix}, no text, no watermark, no visible faces.`;
 
   let response;
   try {
@@ -109,7 +126,7 @@ async function generateBackgroundImage(prompt, outputDir) {
       `${config.together.baseUrl}/images/generations`,
       {
         model: config.together.imageModel,
-        prompt: `${prompt}. Vertical composition, moody cinematic lighting, no text, no watermark, no visible faces.`,
+        prompt: fullPrompt,
         width: 768,
         height: 1344,
         steps: 4,
@@ -181,7 +198,7 @@ function generateGradientFallbackClip(durationSeconds, outputPath) {
   });
 }
 
-async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds }) {
+async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds, styleSuffix }) {
   const manualClip = pickExistingBackgroundClip();
   if (manualClip) {
     logger.step('video', `A usar clip de fundo manual: ${manualClip}`);
@@ -192,7 +209,8 @@ async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds }) 
   try {
     const imagePath = await generateBackgroundImage(
       imagePrompt || 'a moody, cinematic abstract background',
-      outputDir
+      outputDir,
+      styleSuffix
     );
     await imageToKenBurnsClip(imagePath, durationSeconds, kenBurnsPath);
     return kenBurnsPath;
@@ -207,13 +225,30 @@ async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds }) 
 export async function assembleVideo({ audioPath, words, outputDir, imagePrompt }) {
   logger.step('video', 'A montar video final...');
 
+  const settings = getSettings();
+  const captionStyle = CAPTION_STYLE_CATALOG.find(c => c.id === settings.captionStyle) || CAPTION_STYLE_CATALOG[0];
+  const captionPosition = CAPTION_POSITION_CATALOG.find(p => p.id === settings.captionPosition) || CAPTION_POSITION_CATALOG[0];
+  const visualStyle = VISUAL_STYLE_CATALOG.find(v => v.id === settings.visualStyle) || VISUAL_STYLE_CATALOG[0];
+
+  logger.step('video', `Estilo: legenda=${captionStyle.label} (${captionPosition.label}), visual=${visualStyle.label}`);
+
   const chunks = buildCaptionChunks(words);
-  const assPath = generateAssFile(chunks, path.join(outputDir, 'captions.ass'));
+  const assPath = generateAssFile(chunks, path.join(outputDir, 'captions.ass'), {
+    primaryHex: captionStyle.primary,
+    outlineHex: captionStyle.outline,
+    alignment: captionPosition.alignment,
+    marginV: captionPosition.marginV,
+  });
   const musicPath = pickRandomMusic();
   const finalPath = path.join(outputDir, 'final.mp4');
   const durationSeconds = words.length ? words[words.length - 1].end + 1 : 60;
 
-  const backgroundPath = await buildBackgroundClip({ imagePrompt, outputDir, durationSeconds });
+  const backgroundPath = await buildBackgroundClip({
+    imagePrompt,
+    outputDir,
+    durationSeconds,
+    styleSuffix: visualStyle.promptSuffix,
+  });
 
   await new Promise((resolve, reject) => {
     const command = ffmpeg();

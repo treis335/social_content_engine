@@ -190,6 +190,51 @@
     transition: opacity 0.3s;
   }
   .settings-saved.show { opacity: 1; }
+
+  .settings-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 22px 0 4px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .settings-section-title:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+
+  .caption-preview {
+    background: linear-gradient(160deg, #2b2f3a, #12141a);
+    border-radius: 10px;
+    aspect-ratio: 9 / 16;
+    max-height: 220px;
+    margin: 0 auto;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 14px;
+  }
+  .caption-preview.pos-middle { align-items: center; }
+  .caption-preview.pos-top { align-items: flex-start; }
+  .caption-preview-text {
+    font-family: Arial, sans-serif;
+    font-weight: 900;
+    font-size: 20px;
+    text-align: center;
+    line-height: 1.25;
+    text-transform: uppercase;
+    -webkit-text-stroke: 3px #000;
+    paint-order: stroke fill;
+  }
+  .visual-style-swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
 </style>
 </head>
 <body>
@@ -203,7 +248,9 @@
 </header>
 
 <details class="settings-panel" id="settingsPanel">
-  <summary>Definições de geração (voz, tom, idioma, estilo)</summary>
+  <summary>Definições de geração (voz, tom, idioma, legendas, visual)</summary>
+
+  <div class="settings-section-title">Conteúdo</div>
   <div class="settings-grid">
     <div class="field">
       <label for="voiceSelect">Voz</label>
@@ -226,6 +273,36 @@
       <div class="option-desc"></div>
     </div>
   </div>
+
+  <div class="settings-section-title">Legendas</div>
+  <div class="settings-grid" style="grid-template-columns: 1fr 1fr 220px;">
+    <div class="field">
+      <label for="captionStyleSelect">Cor / contraste</label>
+      <select id="captionStyleSelect"></select>
+      <div class="option-desc" id="captionStyleDesc"></div>
+    </div>
+    <div class="field">
+      <label for="captionPositionSelect">Posição no ecrã</label>
+      <select id="captionPositionSelect"></select>
+      <div class="option-desc"></div>
+    </div>
+    <div class="field">
+      <label>Pré-visualização</label>
+      <div class="caption-preview" id="captionPreview">
+        <div class="caption-preview-text" id="captionPreviewText">EXEMPLO DE LEGENDA</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-section-title">Visual do fundo (gerado por IA)</div>
+  <div class="settings-grid">
+    <div class="field">
+      <label for="visualStyleSelect">Estilo visual</label>
+      <select id="visualStyleSelect"></select>
+      <div class="option-desc" id="visualStyleDesc"></div>
+    </div>
+  </div>
+
   <div class="settings-footer">
     <button id="saveSettingsBtn">Guardar definições</button>
     <span class="settings-saved" id="settingsSaved">✓ Guardado — aplica-se ao próximo vídeo gerado</span>
@@ -375,14 +452,23 @@ async function loadSettings() {
   const toneSelect = document.getElementById('toneSelect');
   const styleSelect = document.getElementById('styleSelect');
   const languageSelect = document.getElementById('languageSelect');
+  const captionStyleSelect = document.getElementById('captionStyleSelect');
+  const captionPositionSelect = document.getElementById('captionPositionSelect');
+  const visualStyleSelect = document.getElementById('visualStyleSelect');
 
   fillSelect(languageSelect, catalogs.languages, settings.language);
   refreshVoiceOptions(settings.language, settings.voice);
   fillSelect(toneSelect, catalogs.tones, settings.tone);
   fillSelect(styleSelect, catalogs.styles, settings.style);
+  fillSelect(captionStyleSelect, catalogs.captionStyles, settings.captionStyle);
+  fillSelect(captionPositionSelect, catalogs.captionPositions, settings.captionPosition);
+  fillSelect(visualStyleSelect, catalogs.visualStyles, settings.visualStyle);
 
   updateDesc(document.getElementById('toneDesc'), catalogs.tones, settings.tone);
   updateDesc(document.getElementById('styleDesc'), catalogs.styles, settings.style);
+  updateDesc(document.getElementById('captionStyleDesc'), catalogs.captionStyles, settings.captionStyle);
+  updateDesc(document.getElementById('visualStyleDesc'), catalogs.visualStyles, settings.visualStyle);
+  updateCaptionPreview();
 
   // Cada idioma so tem certas vozes disponiveis (ex: as vozes do modelo
   // Orpheus so falam ingles) — ao trocar de idioma, a lista de vozes
@@ -391,6 +477,12 @@ async function loadSettings() {
   voiceSelect.addEventListener('change', () => updateDesc(document.getElementById('voiceDesc'), catalogsCache.voices, voiceSelect.value));
   toneSelect.addEventListener('change', () => updateDesc(document.getElementById('toneDesc'), catalogsCache.tones, toneSelect.value));
   styleSelect.addEventListener('change', () => updateDesc(document.getElementById('styleDesc'), catalogsCache.styles, styleSelect.value));
+  captionStyleSelect.addEventListener('change', () => {
+    updateDesc(document.getElementById('captionStyleDesc'), catalogsCache.captionStyles, captionStyleSelect.value);
+    updateCaptionPreview();
+  });
+  captionPositionSelect.addEventListener('change', updateCaptionPreview);
+  visualStyleSelect.addEventListener('change', () => updateDesc(document.getElementById('visualStyleDesc'), catalogsCache.visualStyles, visualStyleSelect.value));
 }
 
 function refreshVoiceOptions(language, preferredVoiceId) {
@@ -401,12 +493,33 @@ function refreshVoiceOptions(language, preferredVoiceId) {
   updateDesc(document.getElementById('voiceDesc'), voicesForLanguage, selected);
 }
 
+// Reflete de imediato, na pre-visualizacao, a combinacao de cor + posicao
+// escolhida — sem precisar de gerar um video para ver como vai ficar.
+function updateCaptionPreview() {
+  const captionStyleId = document.getElementById('captionStyleSelect').value;
+  const captionPositionId = document.getElementById('captionPositionSelect').value;
+  const style = catalogsCache.captionStyles.find(c => c.id === captionStyleId);
+  const position = catalogsCache.captionPositions.find(p => p.id === captionPositionId);
+
+  const previewBox = document.getElementById('captionPreview');
+  const previewText = document.getElementById('captionPreviewText');
+
+  previewBox.className = 'caption-preview pos-' + (position ? position.id : 'bottom');
+  if (style) {
+    previewText.style.color = '#' + style.primary;
+    previewText.style.webkitTextStrokeColor = '#' + style.outline;
+  }
+}
+
 async function saveSettings() {
   const payload = {
     voice: document.getElementById('voiceSelect').value,
     tone: document.getElementById('toneSelect').value,
     style: document.getElementById('styleSelect').value,
     language: document.getElementById('languageSelect').value,
+    captionStyle: document.getElementById('captionStyleSelect').value,
+    captionPosition: document.getElementById('captionPositionSelect').value,
+    visualStyle: document.getElementById('visualStyleSelect').value,
   };
   const res = await fetch('/api/settings', {
     method: 'POST',
