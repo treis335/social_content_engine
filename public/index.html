@@ -207,13 +207,23 @@ function renderRun(run) {
   `;
 }
 
+let lastSignature = null;
+
 async function refresh() {
   const { runs, isGenerating } = await fetchRuns();
-  const content = document.getElementById('content');
   const generateBtn = document.getElementById('generateBtn');
 
   generateBtn.disabled = isGenerating;
   generateBtn.textContent = isGenerating ? 'A gerar...' : '+ Gerar novo vídeo';
+
+  // Assinatura leve do estado atual (id + status + youtubeId de cada run).
+  // Se nada mudou desde o ultimo poll, nao tocamos no DOM — assim um <video>
+  // que esteja a tocar no ecra nao e substituido e nao reinicia sozinho.
+  const signature = JSON.stringify(runs.map(r => [r.runId, r.status, r.youtubeId || '']));
+  if (signature === lastSignature) return;
+  lastSignature = signature;
+
+  const content = document.getElementById('content');
 
   if (!runs.length) {
     content.innerHTML = '<div class="empty">Ainda não geraste nenhum vídeo. Carrega em "Gerar novo vídeo" para começar.</div>';
@@ -230,6 +240,7 @@ async function generate() {
     alert(data.error);
     return;
   }
+  lastSignature = null; // forca re-render mesmo que o status ainda nao tenha mudado no backend
   refresh();
 }
 
@@ -240,6 +251,7 @@ async function publishRun(runId) {
   if (data.error) {
     alert('Falhou: ' + data.error);
   }
+  lastSignature = null;
   refresh();
 }
 
