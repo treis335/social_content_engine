@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Karma Court — Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #262b36;
+    --text: #e8eaed;
+    --muted: #8b93a3;
+    --accent: #6c5ce7;
+    --green: #2ecc71;
+    --yellow: #f1c40f;
+    --red: #e74c3c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 32px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  h1 { font-size: 22px; margin: 0; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary { background: var(--card); border: 1px solid var(--border); }
+  button.publish { background: var(--green); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+  .card h3 { margin: 0; font-size: 15px; line-height: 1.4; }
+  .badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.draft { background: rgba(241,196,15,0.15); color: var(--yellow); }
+  .badge.published { background: rgba(46,204,113,0.15); color: var(--green); }
+  .badge.generating, .badge.generating_voice, .badge.generating_video, .badge.publishing {
+    background: rgba(108,92,231,0.15); color: var(--accent);
+  }
+  .badge.failed { background: rgba(231,76,60,0.15); color: var(--red); }
+  video { width: 100%; border-radius: 8px; background: #000; max-height: 400px; }
+  .meta { color: var(--muted); font-size: 12px; margin: 8px 0; }
+  .theme-tag {
+    display: inline-block;
+    background: rgba(255,255,255,0.06);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .actions button { flex: 1; }
+  .empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 60px 20px;
+    font-size: 14px;
+  }
+  .error-msg {
+    color: var(--red);
+    font-size: 12px;
+    margin-top: 8px;
+    background: rgba(231,76,60,0.08);
+    padding: 8px;
+    border-radius: 6px;
+  }
+  .youtube-link {
+    color: var(--green);
+    font-size: 12px;
+    text-decoration: none;
+    display: inline-block;
+    margin-top: 8px;
+  }
+  .spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid rgba(108,92,231,0.3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🎬 Karma Court — Dashboard</h1>
+    <div class="subtitle">Gera, revê e publica os teus vídeos. Nada é publicado sem carregares em "Publicar".</div>
+  </div>
+  <button id="generateBtn">+ Gerar novo vídeo</button>
+</header>
+
+<div id="content">
+  <div class="empty">A carregar...</div>
+</div>
+
+<script>
+const API = '';
+
+async function fetchRuns() {
+  const res = await fetch('/api/runs');
+  return res.json();
+}
+
+function statusLabel(status) {
+  const labels = {
+    generating: 'A gerar história...',
+    generating_voice: 'A gerar voz...',
+    generating_video: 'A montar vídeo...',
+    draft: 'Pronto para rever',
+    publishing: 'A publicar...',
+    published: 'Publicado',
+    failed: 'Falhou',
+  };
+  return labels[status] || status;
+}
+
+function isBusy(status) {
+  return ['generating', 'generating_voice', 'generating_video', 'publishing'].includes(status);
+}
+
+function renderRun(run) {
+  const story = run.story || {};
+  const busy = isBusy(run.status);
+
+  let videoBlock = '';
+  if (run.videoPath) {
+    const relPath = run.videoPath.replace(/^\.?\/?output\//, '');
+    videoBlock = `<video controls src="/output/${relPath}"></video>`;
+  } else if (busy) {
+    videoBlock = `<div class="meta"><span class="spinner"></span> ${statusLabel(run.status)}</div>`;
+  }
+
+  let actions = '';
+  if (run.status === 'draft') {
+    actions = `
+      <div class="actions">
+        <button class="publish" onclick="publishRun('${run.runId}')">Publicar no YouTube</button>
+      </div>`;
+  } else if (run.status === 'published' && run.youtubeId) {
+    actions = `<a class="youtube-link" href="https://youtube.com/shorts/${run.youtubeId}" target="_blank">▶ Ver no YouTube</a>`;
+  }
+
+  const errorBlock = run.error ? `<div class="error-msg">Erro: ${run.error}</div>` : '';
+
+  return `
+    <div class="card" id="run-${run.runId}">
+      <div class="card-header">
+        <h3>${story.title || 'A gerar título...'}</h3>
+        <span class="badge ${run.status}">${statusLabel(run.status)}</span>
+      </div>
+      ${videoBlock}
+      ${story.theme ? `<div class="theme-tag">${story.theme}</div>` : ''}
+      <div class="meta">${new Date(run.createdAt).toLocaleString('pt-PT')}</div>
+      ${errorBlock}
+      ${actions}
+    </div>
+  `;
+}
+
+async function refresh() {
+  const { runs, isGenerating } = await fetchRuns();
+  const content = document.getElementById('content');
+  const generateBtn = document.getElementById('generateBtn');
+
+  generateBtn.disabled = isGenerating;
+  generateBtn.textContent = isGenerating ? 'A gerar...' : '+ Gerar novo vídeo';
+
+  if (!runs.length) {
+    content.innerHTML = '<div class="empty">Ainda não geraste nenhum vídeo. Carrega em "Gerar novo vídeo" para começar.</div>';
+    return;
+  }
+
+  content.innerHTML = `<div class="grid">${runs.map(renderRun).join('')}</div>`;
+}
+
+async function generate() {
+  const res = await fetch('/api/generate', { method: 'POST' });
+  const data = await res.json();
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+  refresh();
+}
+
+async function publishRun(runId) {
+  if (!confirm('Isto vai publicar o vídeo no YouTube AGORA, publicamente. Continuar?')) return;
+  const res = await fetch(`/api/runs/${runId}/publish`, { method: 'POST' });
+  const data = await res.json();
+  if (data.error) {
+    alert('Falhou: ' + data.error);
+  }
+  refresh();
+}
+
+document.getElementById('generateBtn').addEventListener('click', generate);
+
+refresh();
+setInterval(refresh, 4000); // polling simples — atualiza sozinho enquanto algo esta a gerar
+</script>
+
+</body>
+</html>

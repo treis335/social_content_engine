@@ -23,7 +23,7 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-// ---- Historico de videos publicados (evita repetir temas/twists) ----
+// ---- Historico / runs ----
 export function getHistory() {
   return readJson(HISTORY_FILE, { videos: [] });
 }
@@ -32,14 +32,29 @@ export function addToHistory(entry) {
   const history = getHistory();
   history.videos.push({ ...entry, createdAt: new Date().toISOString() });
   writeJson(HISTORY_FILE, history);
+  return entry;
+}
+
+export function updateHistoryEntry(runId, updates) {
+  const history = getHistory();
+  const idx = history.videos.findIndex(v => v.runId === runId);
+  if (idx === -1) throw new Error(`Run ${runId} nao encontrado no historico`);
+  history.videos[idx] = { ...history.videos[idx], ...updates, updatedAt: new Date().toISOString() };
+  writeJson(HISTORY_FILE, history);
+  return history.videos[idx];
+}
+
+export function getRunById(runId) {
+  const history = getHistory();
+  return history.videos.find(v => v.runId === runId) || null;
 }
 
 export function getRecentThemes(limit = 20) {
   const history = getHistory();
-  return history.videos.slice(-limit).map(v => v.theme);
+  return history.videos.slice(-limit).map(v => v.theme).filter(Boolean);
 }
 
-// ---- Performance (para o loop de aprendizagem) ----
+// ---- Performance (loop de aprendizagem) ----
 export function getPerformance() {
   return readJson(PERFORMANCE_FILE, { records: [] });
 }
@@ -50,7 +65,6 @@ export function recordPerformance(videoId, metrics) {
   writeJson(PERFORMANCE_FILE, perf);
 }
 
-// ---- Insights simples: que temas tiveram melhor retencao media ----
 export function getBestPerformingThemes() {
   const history = getHistory();
   const perf = getPerformance();
