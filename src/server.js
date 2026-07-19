@@ -3,7 +3,7 @@ import path from 'path';
 import { config } from './config.js';
 import { logger } from './utils/logger.js';
 import { generateContent, publishRun } from './orchestrator.js';
-import { getHistory, getRunById } from './utils/store.js';
+import { getHistory, getRunById, getSeriesList } from './utils/store.js';
 import { getSettings, updateSettings, getCatalogs } from './utils/settings.js';
 
 const app = express();
@@ -46,6 +46,11 @@ app.post('/api/generate', async (req, res) => {
   } finally {
     isGenerating = false;
   }
+});
+
+app.get('/api/series', (req, res) => {
+  const series = [...getSeriesList()].reverse();
+  res.json({ series });
 });
 
 // ---- Definicoes (voz, tom, idioma, estilo) ----

@@ -175,6 +175,14 @@ const DEFAULT_SETTINGS = {
   // Numero de imagens/cenas de fundo geradas por video (2-3 da mais "accao"
   // visual do que 1 imagem estatica o video todo).
   imagesPerVideo: 3,
+  // Modo series: em vez de historias avulsas e independentes, o sistema cria
+  // sagas com varios episodios (personagens e enredo consistentes de video
+  // para video), com gancho no final de cada episodio ate ao ultimo, que
+  // fecha a historia. So se aplica as categorias "story" (revenge, aita,
+  // true crime, workplace, relationship) — as categorias "info" (motivacional,
+  // factos, etc.) continuam sempre avulsas.
+  seriesMode: false,
+  episodesPerSeries: 6,
 };
 
 function ensureFile() {
@@ -228,6 +236,11 @@ export function updateSettings(updates) {
     const n = parseInt(updates.imagesPerVideo, 10);
     if (![1, 2, 3].includes(n)) throw new Error('"imagesPerVideo" tem de ser 1, 2 ou 3.');
     updates.imagesPerVideo = n;
+  }
+  if (updates.episodesPerSeries !== undefined) {
+    const n = parseInt(updates.episodesPerSeries, 10);
+    if (!Number.isInteger(n) || n < 3 || n > 15) throw new Error('"episodesPerSeries" tem de ser um numero entre 3 e 15.');
+    updates.episodesPerSeries = n;
   }
 
   const next = { ...current, ...updates };

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
-import { getRecentThemes, getBestPerformingThemes, getRecentStyles, getBestPerformingStyles } from '../utils/store.js';
+import { getRecentThemes, getBestPerformingThemes, getRecentStyles, getBestPerformingStyles, getActiveSeriesByStyle, addSeries, updateSeries, appendEpisode } from '../utils/store.js';
 import { getSettings, STYLE_CATALOG } from '../utils/settings.js';
 
 const THEMES_BY_STYLE = {
@@ -101,7 +101,7 @@ const LANGUAGE_INSTRUCTIONS = {
   es: 'Escreve SEMPRE em espanhol (audiencia latino-americana/espanhola).',
 };
 
-function getStyleKind(style) {
+export function getStyleKind(style) {
   const entry = STYLE_CATALOG.find(s => s.id === style);
   return entry?.kind || 'story';
 }
@@ -176,13 +176,26 @@ Devolve um JSON com este formato exato:
  * (quando ja ha dados suficientes) e evita repetir a mesma categoria das
  * ultimas 2 geracoes, para o feed do canal ficar variado sozinho.
  */
-function pickStyle(settings) {
-  if (!settings.autoRotateStyles) return settings.style;
+export function pickStyle(settings, { kindFilter } = {}) {
+  const allPool = kindFilter
+    ? STYLE_CATALOG.filter(s => s.kind === kindFilter).map(s => s.id)
+    : STYLE_CATALOG.map(s => s.id);
 
-  const pool = (settings.activeStyles && settings.activeStyles.length ? settings.activeStyles : STYLE_CATALOG.map(s => s.id));
+  if (!settings.autoRotateStyles) {
+    // Sem rotacao automatica: usa o "style" fixo se ele bater com o filtro
+    // pedido, senao cai para o primeiro da categoria certa (nunca gera algo
+    // fora do kind pedido, ex: nao pode devolver um estilo "info" para series).
+    if (!kindFilter || getStyleKind(settings.style) === kindFilter) return settings.style;
+    return allPool[0];
+  }
+
+  const configuredPool = (settings.activeStyles && settings.activeStyles.length ? settings.activeStyles : STYLE_CATALOG.map(s => s.id));
+  const pool = configuredPool.filter(id => allPool.includes(id));
+  const finalPool = pool.length ? pool : allPool;
+
   const recent = getRecentStyles(2);
-  let candidates = pool.filter(id => !recent.includes(id));
-  if (!candidates.length) candidates = pool;
+  let candidates = finalPool.filter(id => !recent.includes(id));
+  if (!candidates.length) candidates = finalPool;
 
   const best = getBestPerformingStyles().filter(b => candidates.includes(b.style));
   if (best.length >= 2 && Math.random() < 0.7) {
@@ -211,16 +224,12 @@ function pickTheme(style) {
   return pick;
 }
 
-export async function generateStory() {
-  const settings = getSettings();
-  const style = pickStyle(settings);
-  const theme = pickTheme(style);
-  const avoidThemes = getRecentThemes(15);
-  const imageCount = settings.imagesPerVideo || 3;
-  const systemPrompt = buildSystemPrompt({ ...settings, style });
-
-  logger.step('story', `A gerar historia com DeepSeek (voz=${settings.voice}, tom=${settings.tone}, idioma=${settings.language}, estilo=${style})...`);
-
+/**
+ * Chamada generica ao DeepSeek, reutilizada pela geracao avulsa e pela geracao
+ * de series/episodios. Devolve o JSON ja parseado (lanca erro descritivo se
+ * a chamada falhar ou o JSON vier invalido).
+ */
+async function callDeepSeek(systemPrompt, userPrompt, maxTokens = 1400) {
   let response;
   try {
     response = await axios.post(
@@ -229,10 +238,10 @@ export async function generateStory() {
         model: config.deepseek.model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: buildUserPrompt(theme, avoidThemes, settings.language, imageCount) },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.9,
-        max_tokens: 1400,
+        max_tokens: maxTokens,
       },
       {
         headers: {
@@ -248,27 +257,219 @@ export async function generateStory() {
 
   const rawText = response.data.choices?.[0]?.message?.content || '';
   const cleaned = rawText.replace(/```json|```/g, '').trim();
-
-  let story;
   try {
-    story = JSON.parse(cleaned);
+    return JSON.parse(cleaned);
   } catch (err) {
     logger.error('Falha a fazer parse do JSON devolvido pelo DeepSeek:', cleaned);
-    throw new Error('Story generation returned invalid JSON');
+    throw new Error('DeepSeek devolveu um JSON invalido');
   }
+}
 
-  // Rede de seguranca: se o modelo devolver o campo antigo "imagePrompt" (string
-  // unica) ou nao devolver o numero certo de imagens, normaliza para um array
-  // com o tamanho pedido para o resto do pipeline nunca partir por causa disto.
-  let imagePrompts = Array.isArray(story.imagePrompts) ? story.imagePrompts.filter(Boolean) : [];
-  if (!imagePrompts.length && story.imagePrompt) imagePrompts = [story.imagePrompt];
+/**
+ * Normaliza imagePrompts/imagePrompt/narratorGender vindos do DeepSeek para um
+ * formato seguro, independentemente de como o modelo respondeu.
+ */
+function normalizeImagePrompts(data, imageCount) {
+  let imagePrompts = Array.isArray(data.imagePrompts) ? data.imagePrompts.filter(Boolean) : [];
+  if (!imagePrompts.length && data.imagePrompt) imagePrompts = [data.imagePrompt];
   while (imagePrompts.length < imageCount) imagePrompts.push(imagePrompts[imagePrompts.length - 1] || 'a moody, cinematic abstract background');
-  story.imagePrompts = imagePrompts.slice(0, imageCount);
+  return imagePrompts.slice(0, imageCount);
+}
+
+function normalizeGender(gender) {
+  return ['male', 'female'].includes(gender) ? gender : 'neutral';
+}
+
+export async function generateStory(forcedStyle) {
+  const settings = getSettings();
+  const style = forcedStyle || pickStyle(settings);
+  const theme = pickTheme(style);
+  const avoidThemes = getRecentThemes(15);
+  const imageCount = settings.imagesPerVideo || 3;
+  const systemPrompt = buildSystemPrompt({ ...settings, style });
+
+  logger.step('story', `A gerar historia com DeepSeek (voz=${settings.voice}, tom=${settings.tone}, idioma=${settings.language}, estilo=${style})...`);
+
+  const story = await callDeepSeek(systemPrompt, buildUserPrompt(theme, avoidThemes, settings.language, imageCount), 1400);
+
+  story.imagePrompts = normalizeImagePrompts(story, imageCount);
   story.style = style;
-  story.narratorGender = ['male', 'female'].includes(story.narratorGender) ? story.narratorGender : 'neutral';
+  story.narratorGender = normalizeGender(story.narratorGender);
 
   logger.step('story', `Historia gerada: "${story.title}" (categoria: ${style}, narrador: ${story.narratorGender}, ${story.imagePrompts.length} imagens)`);
   return story;
+}
+
+// ============================================================================
+// ---- Series / episodios (sagas com continuidade entre videos) ----
+// ============================================================================
+
+function buildSeriesSystemPrompt({ tone, language, style, episodeNumber, totalEpisodes, isFinalEpisode }) {
+  const toneLine = TONE_INSTRUCTIONS[tone] || TONE_INSTRUCTIONS.dramatic;
+  const langLine = LANGUAGE_INSTRUCTIONS[language] || LANGUAGE_INSTRUCTIONS.en;
+  const styleLabel = style.replace(/_/g, ' ');
+
+  return `Es o guionista de uma serie serializada de "${styleLabel}" para YouTube Shorts/TikTok, atualmente no episodio ${episodeNumber} de ${totalEpisodes}.
+
+Regras obrigatorias:
+- ${langLine}
+- ${toneLine}
+- Mantem TOTAL consistencia com os nomes das personagens, a linha temporal e os factos ja estabelecidos nos episodios anteriores (recebes um resumo deles no prompt seguinte). NUNCA contradigas o que ja aconteceu.
+- Este episodio deve ter 130-190 palavras, tem de se ler bem sozinho (quem ve pela 1a vez percebe o essencial) mas recompensar quem ja acompanha a serie.
+- Primeira frase: entra direto na acao deste episodio (nao percas tempo a recapitular o passado em detalhe).
+${isFinalEpisode
+  ? '- Este e o ULTIMO episodio da serie: fecha a historia com uma resolucao satisfatoria e definitiva. NAO deixes gancho para continuar.'
+  : '- Termina com um gancho forte (cliffhanger) que obrigue o espectador a querer ver JA o proximo episodio.'}
+- Nao uses linguagem ofensiva extrema, discurso de odio, ou conteudo sexual.
+- Devolve APENAS um JSON valido, sem markdown, sem comentarios. Responde SOMENTE com o objeto JSON.`;
+}
+
+function buildSeriesUserPrompt({ premise, characters, recentSummary, episodeNumber, totalEpisodes, isFinalEpisode, language, imageCount }) {
+  const langReminder = FIELD_LANGUAGE_REMINDER[language] || FIELD_LANGUAGE_REMINDER.en;
+  return `Premissa da serie: "${premise}"
+Personagens principais: ${characters}
+Resumo do que ja aconteceu: ${recentSummary || 'Isto e o primeiro episodio — ainda nao ha historial.'}
+
+Este e o episodio ${episodeNumber} de ${totalEpisodes}${isFinalEpisode ? ' — O ULTIMO episodio da serie' : ''}.
+
+${langReminder}
+
+Devolve um JSON com este formato exato:
+{
+  "title": "titulo deste episodio (max 60 caracteres, pode incluir algo tipo 'Ep. ${episodeNumber}')",
+  "hook": "a primeira frase do episodio, isolada",
+  "script": "o episodio completo, incluindo o hook, pronto para narracao",
+  "description": "descricao para o YouTube (2-3 frases + espaco para hashtags)",
+  "tags": ["array", "de", "8 a 12", "tags", "relevantes"],
+  "narratorGender": "\"male\" ou \"female\" — genero de quem narra em primeira pessoa",
+  "imagePrompts": ["array com EXATAMENTE ${imageCount} descricoes visuais curtas, SEMPRE EM INGLES, uma por fase/beat do episodio, atmosfericas, SEM texto, SEM rostos reconheciveis, visualmente distintas entre si"],
+  "thumbnailText": "texto curto (max 5 palavras) para a thumbnail",
+  "episodeSummary": "resumo de 1-2 frases do que aconteceu NESTE episodio, para dar continuidade ao proximo",
+  "cliffhanger": ${isFinalEpisode ? '""' : '"a frase de gancho final deste episodio, isolada, para referencia interna"'}
+}`;
+}
+
+/**
+ * Inventa uma nova saga original (titulo, premissa, personagens) para uma
+ * categoria, usada quando nao ha nenhuma serie ativa nessa categoria.
+ */
+async function generateSeriesPremise({ style, tone, language }) {
+  const styleLabel = style.replace(/_/g, ' ');
+  const langLine = LANGUAGE_INSTRUCTIONS[language] || LANGUAGE_INSTRUCTIONS.en;
+  const toneLine = TONE_INSTRUCTIONS[tone] || TONE_INSTRUCTIONS.dramatic;
+
+  const system = `Es um criador de series serializadas de "${styleLabel}" para YouTube Shorts/TikTok. Inventa uma saga ORIGINAL com potencial para varios episodios: personagens memoraveis, conflito central forte e espaco para escalar ao longo de varios ganchos. ${langLine} ${toneLine} Devolve APENAS JSON valido, sem markdown, sem comentarios.`;
+  const user = `Devolve um JSON com este formato exato:
+{
+  "title": "titulo curto e cativante da serie (max 50 caracteres)",
+  "premise": "premissa da serie em 2-3 frases: situacao inicial, conflito central, o que esta em jogo",
+  "characters": "personagens principais com 1 traço distintivo cada, formato 'Nome (papel): traço; Nome2 (papel): traço'"
+}`;
+
+  return callDeepSeek(system, user, 500);
+}
+
+function buildRecentSummaryText(series) {
+  if (!series.episodes.length) return null;
+  return series.episodes
+    .slice(-3)
+    .map(e => `Ep.${e.number}: ${e.summary}${e.cliffhanger ? ` (terminou em: "${e.cliffhanger}")` : ''}`)
+    .join(' ');
+}
+
+async function pickOrCreateSeries(style, settings) {
+  const active = getActiveSeriesByStyle(style);
+  if (active.length) {
+    // Round-robin: continua a saga que ha mais tempo nao tem episodio novo,
+    // para varias sagas da mesma categoria avancarem todas, em vez de so uma.
+    return active.sort((a, b) => new Date(a.updatedAt || a.createdAt) - new Date(b.updatedAt || b.createdAt))[0];
+  }
+
+  logger.step('story', `Nenhuma serie ativa em "${style}" — a criar uma nova saga...`);
+  const premiseData = await generateSeriesPremise({ style, tone: settings.tone, language: settings.language });
+  const series = {
+    id: `series_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    title: premiseData.title,
+    style,
+    language: settings.language,
+    tone: settings.tone,
+    premise: premiseData.premise,
+    characters: premiseData.characters,
+    totalEpisodesPlanned: settings.episodesPerSeries || 6,
+    status: 'active',
+    playlistId: null,
+    narratorGender: null,
+    episodes: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  addSeries(series);
+  logger.step('story', `Nova saga criada: "${series.title}" (${series.totalEpisodesPlanned} episodios planeados)`);
+  return series;
+}
+
+/**
+ * Escolhe/cria uma serie e gera o proximo episodio, mantendo continuidade com
+ * os episodios anteriores (personagens, enredo, cliffhangers). So deve ser
+ * chamada para categorias do tipo "story".
+ */
+export async function generateSeriesEpisode(settings, style) {
+  const series = await pickOrCreateSeries(style, settings);
+  const episodeNumber = series.episodes.length + 1;
+  const totalEpisodes = series.totalEpisodesPlanned;
+  const isFinalEpisode = episodeNumber >= totalEpisodes;
+  const imageCount = settings.imagesPerVideo || 3;
+
+  const systemPrompt = buildSeriesSystemPrompt({ tone: series.tone, language: series.language, style, episodeNumber, totalEpisodes, isFinalEpisode });
+  const userPrompt = buildSeriesUserPrompt({
+    premise: series.premise,
+    characters: series.characters,
+    recentSummary: buildRecentSummaryText(series),
+    episodeNumber,
+    totalEpisodes,
+    isFinalEpisode,
+    language: series.language,
+    imageCount,
+  });
+
+  logger.step('story', `A gerar episodio ${episodeNumber}/${totalEpisodes} de "${series.title}"...`);
+  const data = await callDeepSeek(systemPrompt, userPrompt, 1500);
+
+  const imagePrompts = normalizeImagePrompts(data, imageCount);
+  // A voz/genero do narrador mantem-se igual ao longo de toda a saga (definido
+  // no episodio 1); so se recalcula se por algum motivo ainda nao estava guardado.
+  const narratorGender = series.narratorGender || normalizeGender(data.narratorGender);
+  if (!series.narratorGender) updateSeries(series.id, { narratorGender });
+
+  appendEpisode(series.id, {
+    number: episodeNumber,
+    title: data.title,
+    summary: data.episodeSummary || '',
+    cliffhanger: isFinalEpisode ? '' : (data.cliffhanger || ''),
+    youtubeId: null,
+    publishedAt: null,
+    createdAt: new Date().toISOString(),
+  });
+  updateSeries(series.id, { status: isFinalEpisode ? 'completed' : 'active' });
+
+  logger.step('story', `Episodio gerado: "${data.title}" (${series.title}, ep. ${episodeNumber}/${totalEpisodes}${isFinalEpisode ? ' — FINAL' : ''})`);
+
+  return {
+    title: `${series.title} — Ep. ${episodeNumber}${isFinalEpisode ? ' (Final)' : ''}`,
+    hook: data.hook,
+    script: data.script,
+    description: `${data.description}\n\n${series.title} · Episódio ${episodeNumber}/${totalEpisodes}`,
+    tags: data.tags,
+    theme: series.title,
+    style,
+    imagePrompts,
+    narratorGender,
+    seriesId: series.id,
+    seriesTitle: series.title,
+    episodeNumber,
+    totalEpisodesPlanned: totalEpisodes,
+    isFinalEpisode,
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

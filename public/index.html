@@ -235,6 +235,20 @@
     margin-right: 6px;
     vertical-align: middle;
   }
+  .series-progress-track {
+    background: rgba(255,255,255,0.08);
+    border-radius: 20px;
+    height: 8px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .series-progress-fill {
+    background: var(--accent);
+    height: 100%;
+    border-radius: 20px;
+  }
+  .badge.completed { background: rgba(46,204,113,0.15); color: var(--green); }
+  .badge.active { background: rgba(241,196,15,0.15); color: var(--yellow); }
 </style>
 </head>
 <body>
@@ -338,9 +352,31 @@
     <div id="activeStylesList" style="display:flex; flex-wrap:wrap; gap:10px;"></div>
   </div>
 
+  <div class="settings-section-title">Modo Séries (episódios com continuidade)</div>
+  <div class="settings-grid">
+    <div class="field" style="grid-column: 1 / -1;">
+      <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+        <input type="checkbox" id="seriesModeCheckbox" style="width:auto;">
+        Criar sagas com vários episódios (personagens e enredo consistentes) em vez de histórias avulsas
+      </label>
+      <div class="option-desc">Aplica-se só às categorias tipo "história" (revenge, AITA, true crime, workplace, relationship). Cada categoria pode ter várias sagas em curso ao mesmo tempo — ex: 2 romances diferentes a avançar em paralelo. As categorias "info" (motivacional, factos, etc.) continuam sempre avulsas.</div>
+    </div>
+    <div class="field">
+      <label for="episodesPerSeriesInput">Episódios por saga</label>
+      <input type="number" id="episodesPerSeriesInput" min="3" max="15" step="1" style="padding:8px; border-radius:8px; border:1px solid #333; background:#111; color:#eee;">
+    </div>
+  </div>
+
   <div class="settings-footer">
     <button id="saveSettingsBtn">Guardar definições</button>
     <span class="settings-saved" id="settingsSaved">✓ Guardado — aplica-se ao próximo vídeo gerado</span>
+  </div>
+</details>
+
+<details class="settings-panel" id="seriesPanel">
+  <summary>Séries em curso</summary>
+  <div id="seriesList" style="margin-top:18px;">
+    <div class="empty">A carregar...</div>
   </div>
 </details>
 
@@ -503,6 +539,8 @@ async function loadSettings() {
   document.getElementById('autoRotateCheckbox').checked = !!settings.autoRotateStyles;
   document.getElementById('autoVoiceCheckbox').checked = !!settings.autoVoiceMatch;
   document.getElementById('autoVisualCheckbox').checked = !!settings.autoVisualMatch;
+  document.getElementById('seriesModeCheckbox').checked = !!settings.seriesMode;
+  document.getElementById('episodesPerSeriesInput').value = settings.episodesPerSeries || 6;
   const activeStylesList = document.getElementById('activeStylesList');
   activeStylesList.innerHTML = '';
   catalogs.styles.forEach(s => {
@@ -575,6 +613,8 @@ async function saveSettings() {
     autoVoiceMatch: document.getElementById('autoVoiceCheckbox').checked,
     autoVisualMatch: document.getElementById('autoVisualCheckbox').checked,
     activeStyles: Array.from(document.querySelectorAll('#activeStylesList input:checked')).map(i => i.value),
+    seriesMode: document.getElementById('seriesModeCheckbox').checked,
+    episodesPerSeries: parseInt(document.getElementById('episodesPerSeriesInput').value, 10),
   };
   if (payload.autoRotateStyles && !payload.activeStyles.length) {
     alert('Seleciona pelo menos 1 categoria para a rotação automática.');
@@ -597,6 +637,51 @@ async function saveSettings() {
 
 document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
 loadSettings();
+
+async function loadSeries() {
+  const container = document.getElementById('seriesList');
+  try {
+    const res = await fetch('/api/series');
+    const { series } = await res.json();
+    if (!series.length) {
+      container.innerHTML = '<div class="empty">Ainda não há nenhuma saga criada. Ativa o "Modo Séries" nas definições para o sistema começar a criar sagas sozinho.</div>';
+      return;
+    }
+    container.innerHTML = `<div class="grid">${series.map(renderSeriesCard).join('')}</div>`;
+  } catch (err) {
+    container.innerHTML = '<div class="empty">Falha a carregar séries.</div>';
+  }
+}
+
+function renderSeriesCard(s) {
+  const styleLabel = (catalogsCache?.styles || []).find(c => c.id === s.style)?.label || s.style;
+  const done = s.episodes.length;
+  const total = s.totalEpisodesPlanned;
+  const pct = Math.min(100, Math.round((done / total) * 100));
+  const publishedCount = s.episodes.filter(e => e.youtubeId).length;
+  const episodesList = s.episodes.map(e =>
+    `<div style="font-size:12px; color:var(--muted); margin-top:4px;">Ep. ${e.number}: ${escapeHtml(e.title || '')} ${e.youtubeId ? '✅' : '⏳'}</div>`
+  ).join('');
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h3>${escapeHtml(s.title)}</h3>
+        <span class="badge ${s.status}">${s.status === 'completed' ? 'Completa' : 'Ativa'}</span>
+      </div>
+      <div class="meta">${escapeHtml(styleLabel)} · ${done}/${total} episódios · ${publishedCount} publicado(s)</div>
+      <div class="series-progress-track"><div class="series-progress-fill" style="width:${pct}%"></div></div>
+      <div class="theme-tag">${escapeHtml(s.premise || '')}</div>
+      ${episodesList}
+    </div>
+  `;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+loadSeries();
+setInterval(loadSeries, 15000);
 </script>
 
 </body>

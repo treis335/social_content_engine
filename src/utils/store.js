@@ -4,6 +4,7 @@ import { config } from '../config.js';
 
 const HISTORY_FILE = path.join(config.paths.dataDir, 'history.json');
 const PERFORMANCE_FILE = path.join(config.paths.dataDir, 'performance.json');
+const SERIES_FILE = path.join(config.paths.dataDir, 'series.json');
 
 function ensureFile(filePath, defaultValue) {
   if (!fs.existsSync(config.paths.dataDir)) {
@@ -118,4 +119,62 @@ export function getBestPerformingStyles() {
       sampleSize: scores.length,
     }))
     .sort((a, b) => b.avgRetention - a.avgRetention);
+}
+
+// ---- Series / episodios ----
+export function getSeriesList() {
+  return readJson(SERIES_FILE, { series: [] }).series;
+}
+
+export function getSeriesById(id) {
+  return getSeriesList().find(s => s.id === id) || null;
+}
+
+export function getActiveSeriesByStyle(style) {
+  return getSeriesList().filter(s => s.style === style && s.status === 'active');
+}
+
+export function addSeries(series) {
+  const data = readJson(SERIES_FILE, { series: [] });
+  data.series.push(series);
+  writeJson(SERIES_FILE, data);
+  return series;
+}
+
+export function updateSeries(id, updates) {
+  const data = readJson(SERIES_FILE, { series: [] });
+  const idx = data.series.findIndex(s => s.id === id);
+  if (idx === -1) throw new Error(`Serie ${id} nao encontrada`);
+  data.series[idx] = { ...data.series[idx], ...updates, updatedAt: new Date().toISOString() };
+  writeJson(SERIES_FILE, data);
+  return data.series[idx];
+}
+
+/**
+ * Regista o resultado de um episodio (usado a seguir a geracao) e devolve a
+ * serie atualizada.
+ */
+export function appendEpisode(seriesId, episode) {
+  const data = readJson(SERIES_FILE, { series: [] });
+  const idx = data.series.findIndex(s => s.id === seriesId);
+  if (idx === -1) throw new Error(`Serie ${seriesId} nao encontrada`);
+  data.series[idx].episodes.push(episode);
+  data.series[idx].updatedAt = new Date().toISOString();
+  writeJson(SERIES_FILE, data);
+  return data.series[idx];
+}
+
+/**
+ * Atualiza um episodio ja existente (usado depois de publicar, para guardar
+ * youtubeId/publishedAt no episodio certo).
+ */
+export function updateEpisode(seriesId, episodeNumber, updates) {
+  const data = readJson(SERIES_FILE, { series: [] });
+  const series = data.series.find(s => s.id === seriesId);
+  if (!series) throw new Error(`Serie ${seriesId} nao encontrada`);
+  const ep = series.episodes.find(e => e.number === episodeNumber);
+  if (!ep) throw new Error(`Episodio ${episodeNumber} nao encontrado na serie ${seriesId}`);
+  Object.assign(ep, updates);
+  writeJson(SERIES_FILE, data);
+  return ep;
 }

@@ -44,6 +44,46 @@ export async function uploadToYouTube({ videoPath, title, description, tags }) {
 }
 
 /**
+ * Cria uma playlist nova no canal (usada para agrupar os episodios de uma
+ * serie, para quem vir um episodio conseguir facilmente ver os outros e
+ * ficar "agarrado" ao canal — essencial para audiencia/retencao).
+ */
+export async function createPlaylist(title, description) {
+  const auth = getAuthedClient();
+  const youtube = google.youtube({ version: 'v3', auth });
+
+  const res = await youtube.playlists.insert({
+    part: ['snippet', 'status'],
+    requestBody: {
+      snippet: { title, description },
+      status: { privacyStatus: 'public' },
+    },
+  });
+
+  logger.step('publish', `Playlist criada: "${title}" (${res.data.id})`);
+  return res.data.id;
+}
+
+/**
+ * Adiciona um video ja publicado a uma playlist existente.
+ */
+export async function addVideoToPlaylist(playlistId, videoId) {
+  const auth = getAuthedClient();
+  const youtube = google.youtube({ version: 'v3', auth });
+
+  await youtube.playlistItems.insert({
+    part: ['snippet'],
+    requestBody: {
+      snippet: {
+        playlistId,
+        resourceId: { kind: 'youtube#video', videoId },
+      },
+    },
+  });
+  logger.step('publish', `Video ${videoId} adicionado a playlist ${playlistId}`);
+}
+
+/**
  * Recolhe metricas basicas de um video (para o loop de aprendizagem).
  * Nota: "averageViewPercentage" so fica disponivel via YouTube Analytics API,
  * que exige um scope OAuth adicional (youtube.readonly + yt-analytics.readonly).
