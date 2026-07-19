@@ -301,6 +301,27 @@
       <select id="visualStyleSelect"></select>
       <div class="option-desc" id="visualStyleDesc"></div>
     </div>
+    <div class="field">
+      <label for="imagesPerVideoSelect">Imagens/cenas por vídeo</label>
+      <select id="imagesPerVideoSelect">
+        <option value="1">1 (imagem única, fundo estático)</option>
+        <option value="2">2 (mais ação visual)</option>
+        <option value="3">3 (máxima variação)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="settings-section-title">Rotação automática de categorias</div>
+  <div class="field" style="margin-bottom: 12px;">
+    <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+      <input type="checkbox" id="autoRotateCheckbox" style="width:auto;">
+      Gerar sozinho, alternando entre as categorias abaixo (em vez de usar sempre "Estilo de vídeos" fixo)
+    </label>
+    <div class="option-desc">Dá mais peso às categorias com melhor retenção histórica e evita repetir a mesma categoria seguida — é o motor de conteúdo 100% autónomo.</div>
+  </div>
+  <div class="field" id="activeStylesField">
+    <label>Categorias ativas na rotação</label>
+    <div id="activeStylesList" style="display:flex; flex-wrap:wrap; gap:10px;"></div>
   </div>
 
   <div class="settings-footer">
@@ -463,6 +484,19 @@ async function loadSettings() {
   fillSelect(captionStyleSelect, catalogs.captionStyles, settings.captionStyle);
   fillSelect(captionPositionSelect, catalogs.captionPositions, settings.captionPosition);
   fillSelect(visualStyleSelect, catalogs.visualStyles, settings.visualStyle);
+  document.getElementById('imagesPerVideoSelect').value = String(settings.imagesPerVideo || 3);
+
+  document.getElementById('autoRotateCheckbox').checked = !!settings.autoRotateStyles;
+  const activeStylesList = document.getElementById('activeStylesList');
+  activeStylesList.innerHTML = '';
+  catalogs.styles.forEach(s => {
+    const id = 'activeStyle_' + s.id;
+    const wrap = document.createElement('label');
+    wrap.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:normal;';
+    const checked = (settings.activeStyles || []).includes(s.id) ? 'checked' : '';
+    wrap.innerHTML = `<input type="checkbox" id="${id}" value="${s.id}" style="width:auto;" ${checked}> ${s.label}`;
+    activeStylesList.appendChild(wrap);
+  });
 
   updateDesc(document.getElementById('toneDesc'), catalogs.tones, settings.tone);
   updateDesc(document.getElementById('styleDesc'), catalogs.styles, settings.style);
@@ -520,7 +554,14 @@ async function saveSettings() {
     captionStyle: document.getElementById('captionStyleSelect').value,
     captionPosition: document.getElementById('captionPositionSelect').value,
     visualStyle: document.getElementById('visualStyleSelect').value,
+    imagesPerVideo: parseInt(document.getElementById('imagesPerVideoSelect').value, 10),
+    autoRotateStyles: document.getElementById('autoRotateCheckbox').checked,
+    activeStyles: Array.from(document.querySelectorAll('#activeStylesList input:checked')).map(i => i.value),
   };
+  if (payload.autoRotateStyles && !payload.activeStyles.length) {
+    alert('Seleciona pelo menos 1 categoria para a rotação automática.');
+    return;
+  }
   const res = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -24,12 +24,12 @@ export async function generateContent() {
     logger.info(`Nova geracao iniciada: ${runId}`);
 
     const story = await generateStory();
-    updateHistoryEntry(runId, { status: 'generating_voice', theme: story.theme, title: story.title, story });
+    updateHistoryEntry(runId, { status: 'generating_voice', theme: story.theme, title: story.title, style: story.style, story });
 
     const { audioPath, words } = await generateVoice(story.script, outputDir);
     updateHistoryEntry(runId, { status: 'generating_video' });
 
-    const videoPath = await assembleVideo({ audioPath, words, outputDir, imagePrompt: story.imagePrompt });
+    const videoPath = await assembleVideo({ audioPath, words, outputDir, imagePrompts: story.imagePrompts });
 
     updateHistoryEntry(runId, {
       status: 'draft',

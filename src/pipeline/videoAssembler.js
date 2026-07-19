@@ -115,7 +115,7 @@ function describeAxiosError(err) {
  * e largura/altura tem de ser multiplos de 32 — por isso usamos 768x1344 (proporcao
  * vertical proxima de 9:16) em vez de 1080x1920 diretamente.
  */
-async function generateBackgroundImage(prompt, outputDir, styleSuffix) {
+async function generateBackgroundImage(prompt, outputDir, styleSuffix, fileName = 'background.png') {
   logger.step('video', 'A gerar imagem de fundo com FLUX (Together AI)...');
 
   const fullPrompt = `${prompt}. Vertical composition, ${styleSuffix}, no text, no watermark, no visible faces.`;
@@ -144,7 +144,7 @@ async function generateBackgroundImage(prompt, outputDir, styleSuffix) {
   }
 
   const imageData = response.data.data[0];
-  const imagePath = path.join(outputDir, 'background.png');
+  const imagePath = path.join(outputDir, fileName);
 
   if (imageData.b64_json) {
     fs.writeFileSync(imagePath, Buffer.from(imageData.b64_json, 'base64'));
@@ -198,22 +198,63 @@ function generateGradientFallbackClip(durationSeconds, outputPath) {
   });
 }
 
-async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds, styleSuffix }) {
+/**
+ * Concatena varios clips (mesmo codec/resolucao) num unico ficheiro, usando o
+ * demuxer "concat" do ffmpeg (rapido, sem reencodar, porque todos os clips
+ * saem do imageToKenBurnsClip com as mesmas definicoes).
+ */
+function concatClips(clipPaths, outputDir, outputPath) {
+  if (clipPaths.length === 1) return clipPaths[0];
+
+  const listPath = path.join(outputDir, 'concat_list.txt');
+  const listContent = clipPaths.map(p => `file '${escapePathForFfmpegFilter(path.resolve(p))}'`).join('\n');
+  fs.writeFileSync(listPath, listContent);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(listPath)
+      .inputOptions(['-f concat', '-safe 0'])
+      .outputOptions(['-c copy'])
+      .output(outputPath)
+      .on('error', reject)
+      .on('end', () => resolve(outputPath))
+      .run();
+  });
+}
+
+/**
+ * Divide a duracao total do video em N cenas (uma por imagePrompt) e gera um
+ * clip Ken Burns por cena, para o video ter mais "acção" visual em vez de uma
+ * unica imagem estatica do inicio ao fim. Cada cena usa uma imagem gerada por
+ * IA diferente (uma por "beat" da narracao/conteudo).
+ */
+async function buildBackgroundClips({ imagePrompts, outputDir, durationSeconds, styleSuffix }) {
   const manualClip = pickExistingBackgroundClip();
   if (manualClip) {
     logger.step('video', `A usar clip de fundo manual: ${manualClip}`);
     return manualClip;
   }
 
-  const kenBurnsPath = path.join(outputDir, 'background_clip.mp4');
+  const prompts = (imagePrompts && imagePrompts.length ? imagePrompts : ['a moody, cinematic abstract background']);
+  const sceneCount = prompts.length;
+  const baseSceneDuration = durationSeconds / sceneCount;
+
   try {
-    const imagePath = await generateBackgroundImage(
-      imagePrompt || 'a moody, cinematic abstract background',
-      outputDir,
-      styleSuffix
-    );
-    await imageToKenBurnsClip(imagePath, durationSeconds, kenBurnsPath);
-    return kenBurnsPath;
+    const sceneClipPaths = [];
+    for (let i = 0; i < sceneCount; i++) {
+      // A ultima cena absorve o resto de segundos para a soma bater certo com durationSeconds.
+      const sceneDuration = i === sceneCount - 1
+        ? durationSeconds - baseSceneDuration * (sceneCount - 1)
+        : baseSceneDuration;
+
+      const imagePath = await generateBackgroundImage(prompts[i], outputDir, styleSuffix, `background_${i}.png`);
+      const clipPath = path.join(outputDir, `background_clip_${i}.mp4`);
+      await imageToKenBurnsClip(imagePath, sceneDuration, clipPath);
+      sceneClipPaths.push(clipPath);
+    }
+
+    const finalBackgroundPath = path.join(outputDir, 'background_combined.mp4');
+    return await concatClips(sceneClipPaths, outputDir, finalBackgroundPath);
   } catch (err) {
     logger.warn(`Fundo com IA falhou (${err.message}). A usar fundo alternativo gerado localmente.`);
     const fallbackPath = path.join(outputDir, 'background_fallback.mp4');
@@ -222,7 +263,7 @@ async function buildBackgroundClip({ imagePrompt, outputDir, durationSeconds, st
   }
 }
 
-export async function assembleVideo({ audioPath, words, outputDir, imagePrompt }) {
+export async function assembleVideo({ audioPath, words, outputDir, imagePrompts }) {
   logger.step('video', 'A montar video final...');
 
   const settings = getSettings();
@@ -243,8 +284,8 @@ export async function assembleVideo({ audioPath, words, outputDir, imagePrompt }
   const finalPath = path.join(outputDir, 'final.mp4');
   const durationSeconds = words.length ? words[words.length - 1].end + 1 : 60;
 
-  const backgroundPath = await buildBackgroundClip({
-    imagePrompt,
+  const backgroundPath = await buildBackgroundClips({
+    imagePrompts,
     outputDir,
     durationSeconds,
     styleSuffix: visualStyle.promptSuffix,

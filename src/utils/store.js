@@ -54,6 +54,13 @@ export function getRecentThemes(limit = 20) {
   return history.videos.slice(-limit).map(v => v.theme).filter(Boolean);
 }
 
+// Ultimas categorias usadas (para a rotacao automatica evitar repetir a mesma
+// categoria demasiadas vezes seguidas).
+export function getRecentStyles(limit = 10) {
+  const history = getHistory();
+  return history.videos.slice(-limit).map(v => v.style).filter(Boolean);
+}
+
 // ---- Performance (loop de aprendizagem) ----
 export function getPerformance() {
   return readJson(PERFORMANCE_FILE, { records: [] });
@@ -81,6 +88,32 @@ export function getBestPerformingThemes() {
   return Object.entries(themeScores)
     .map(([theme, scores]) => ({
       theme,
+      avgRetention: scores.reduce((a, b) => a + b, 0) / scores.length,
+      sampleSize: scores.length,
+    }))
+    .sort((a, b) => b.avgRetention - a.avgRetention);
+}
+
+/**
+ * Ranking de retencao media por categoria (style), usado pela rotacao
+ * automatica para dar mais peso as categorias que tem tido melhor desempenho.
+ */
+export function getBestPerformingStyles() {
+  const history = getHistory();
+  const perf = getPerformance();
+
+  const styleScores = {};
+  for (const record of perf.records) {
+    const video = history.videos.find(v => v.youtubeId === record.videoId);
+    if (!video || !video.style) continue;
+    const score = record.metrics.averageViewPercentage || 0;
+    if (!styleScores[video.style]) styleScores[video.style] = [];
+    styleScores[video.style].push(score);
+  }
+
+  return Object.entries(styleScores)
+    .map(([style, scores]) => ({
+      style,
       avgRetention: scores.reduce((a, b) => a + b, 0) / scores.length,
       sampleSize: scores.length,
     }))

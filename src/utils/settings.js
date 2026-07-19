@@ -48,12 +48,19 @@ export const TONE_CATALOG = [
 ];
 
 // ---- Estilos/nichos de vídeo ----
+// "kind" distingue formato "story" (narrativa com twist) de "info" (facto/insight
+// autoconclusivo) — o storyGenerator usa isto para escolher a estrutura certa.
 export const STYLE_CATALOG = [
-  { id: 'revenge_justice_stories', label: 'Revenge / Justice Stories', desc: 'r/MaliciousCompliance, r/ProRevenge' },
-  { id: 'aita_drama', label: 'AITA / Drama Familiar', desc: 'r/AmITheAsshole, conflitos de família' },
-  { id: 'true_crime_lite', label: 'True Crime (leve)', desc: 'Casos misteriosos, resolução satisfatória' },
-  { id: 'workplace_karma', label: 'Workplace Karma', desc: 'Chefes, colegas, escritório' },
-  { id: 'relationship_drama', label: 'Relationship Drama', desc: 'Traições, ex, casamentos' },
+  { id: 'revenge_justice_stories', label: 'Revenge / Justice Stories', kind: 'story', desc: 'r/MaliciousCompliance, r/ProRevenge' },
+  { id: 'aita_drama', label: 'AITA / Drama Familiar', kind: 'story', desc: 'r/AmITheAsshole, conflitos de família' },
+  { id: 'true_crime_lite', label: 'True Crime (leve)', kind: 'story', desc: 'Casos misteriosos, resolução satisfatória' },
+  { id: 'workplace_karma', label: 'Workplace Karma', kind: 'story', desc: 'Chefes, colegas, escritório' },
+  { id: 'relationship_drama', label: 'Relationship Drama', kind: 'story', desc: 'Traições, ex, casamentos' },
+  { id: 'motivational', label: 'Motivacional', kind: 'info', desc: 'Mentalidade, disciplina, superação — estilo discurso curto' },
+  { id: 'educational_facts', label: 'Educacional / Factos', kind: 'info', desc: 'Curiosidades e factos surpreendentes explicados de forma simples' },
+  { id: 'psychology_insights', label: 'Psicologia / Comportamento', kind: 'info', desc: 'Insights sobre comportamento humano e relações' },
+  { id: 'life_hacks', label: 'Life Hacks / Produtividade', kind: 'info', desc: 'Dicas práticas e acionáveis do dia a dia' },
+  { id: 'history_mysteries', label: 'História / Mistérios', kind: 'info', desc: 'Factos históricos intrigantes e mistérios por resolver' },
 ];
 
 export const LANGUAGE_CATALOG = [
@@ -102,6 +109,16 @@ const DEFAULT_SETTINGS = {
   captionStyle: 'bold_yellow',
   captionPosition: 'bottom',
   visualStyle: 'cinematic_realistic',
+  // Rotacao automatica de categorias: quando ativa, cada geracao escolhe uma
+  // categoria de "activeStyles" (em vez de usar sempre "style" fixo), com peso
+  // a favor das que tem tido melhor retencao. E o que permite ao canal gerar
+  // conteudo variado (motivacional, factos, revenge, etc.) sozinho, sem
+  // precisares de trocar a categoria manualmente.
+  autoRotateStyles: false,
+  activeStyles: STYLE_CATALOG.map(s => s.id),
+  // Numero de imagens/cenas de fundo geradas por video (2-3 da mais "accao"
+  // visual do que 1 imagem estatica o video todo).
+  imagesPerVideo: 3,
 };
 
 function ensureFile() {
@@ -143,6 +160,18 @@ export function updateSettings(updates) {
   }
   if (updates.visualStyle && !VISUAL_STYLE_CATALOG.some(v => v.id === updates.visualStyle)) {
     throw new Error(`Estilo visual "${updates.visualStyle}" inválido.`);
+  }
+  if (updates.activeStyles) {
+    if (!Array.isArray(updates.activeStyles) || !updates.activeStyles.length) {
+      throw new Error('"activeStyles" tem de ser uma lista com pelo menos 1 categoria.');
+    }
+    const invalid = updates.activeStyles.filter(id => !STYLE_CATALOG.some(s => s.id === id));
+    if (invalid.length) throw new Error(`Categorias inválidas em activeStyles: ${invalid.join(', ')}`);
+  }
+  if (updates.imagesPerVideo !== undefined) {
+    const n = parseInt(updates.imagesPerVideo, 10);
+    if (![1, 2, 3].includes(n)) throw new Error('"imagesPerVideo" tem de ser 1, 2 ou 3.');
+    updates.imagesPerVideo = n;
   }
 
   const next = { ...current, ...updates };
