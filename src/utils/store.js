@@ -1,0 +1,74 @@
+import fs from 'fs';
+import path from 'path';
+import { config } from '../config.js';
+
+const HISTORY_FILE = path.join(config.paths.dataDir, 'history.json');
+const PERFORMANCE_FILE = path.join(config.paths.dataDir, 'performance.json');
+
+function ensureFile(filePath, defaultValue) {
+  if (!fs.existsSync(config.paths.dataDir)) {
+    fs.mkdirSync(config.paths.dataDir, { recursive: true });
+  }
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2));
+  }
+}
+
+function readJson(filePath, defaultValue) {
+  ensureFile(filePath, defaultValue);
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function writeJson(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+// ---- Historico de videos publicados (evita repetir temas/twists) ----
+export function getHistory() {
+  return readJson(HISTORY_FILE, { videos: [] });
+}
+
+export function addToHistory(entry) {
+  const history = getHistory();
+  history.videos.push({ ...entry, createdAt: new Date().toISOString() });
+  writeJson(HISTORY_FILE, history);
+}
+
+export function getRecentThemes(limit = 20) {
+  const history = getHistory();
+  return history.videos.slice(-limit).map(v => v.theme);
+}
+
+// ---- Performance (para o loop de aprendizagem) ----
+export function getPerformance() {
+  return readJson(PERFORMANCE_FILE, { records: [] });
+}
+
+export function recordPerformance(videoId, metrics) {
+  const perf = getPerformance();
+  perf.records.push({ videoId, metrics, capturedAt: new Date().toISOString() });
+  writeJson(PERFORMANCE_FILE, perf);
+}
+
+// ---- Insights simples: que temas tiveram melhor retencao media ----
+export function getBestPerformingThemes() {
+  const history = getHistory();
+  const perf = getPerformance();
+
+  const themeScores = {};
+  for (const record of perf.records) {
+    const video = history.videos.find(v => v.youtubeId === record.videoId);
+    if (!video) continue;
+    const score = record.metrics.averageViewPercentage || 0;
+    if (!themeScores[video.theme]) themeScores[video.theme] = [];
+    themeScores[video.theme].push(score);
+  }
+
+  return Object.entries(themeScores)
+    .map(([theme, scores]) => ({
+      theme,
+      avgRetention: scores.reduce((a, b) => a + b, 0) / scores.length,
+      sampleSize: scores.length,
+    }))
+    .sort((a, b) => b.avgRetention - a.avgRetention);
+}

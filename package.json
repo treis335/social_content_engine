@@ -1,0 +1,25 @@
+{
+  "name": "karma-court",
+  "version": "0.1.0",
+  "description": "Sistema 100% autonomo de criacao e publicacao de video: ideia -> historia -> voz -> video -> publicacao -> aprendizagem",
+  "type": "module",
+  "main": "src/orchestrator.js",
+  "scripts": {
+    "start": "node src/orchestrator.js",
+    "run:once": "node src/orchestrator.js --once",
+    "test:story": "node src/pipeline/storyGenerator.js",
+    "test:tts": "node src/pipeline/ttsGenerator.js",
+    "test:video": "node src/pipeline/videoAssembler.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "googleapis": "^144.0.0",
+    "axios": "^1.7.7",
+    "fluent-ffmpeg": "^2.1.3",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
