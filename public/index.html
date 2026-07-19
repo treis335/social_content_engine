@@ -175,8 +175,7 @@ function renderRun(run) {
 
   let videoBlock = '';
   if (run.videoPath) {
-    const relPath = run.videoPath.replace(/^\.?\/?output\//, '');
-    videoBlock = `<video controls src="/output/${relPath}"></video>`;
+    videoBlock = `<video controls preload="metadata" src="/output/${run.runId}/final.mp4"></video>`;
   } else if (busy) {
     videoBlock = `<div class="meta"><span class="spinner"></span> ${statusLabel(run.status)}</div>`;
   }
